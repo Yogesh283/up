@@ -29,40 +29,65 @@ class SattaMatkaApi
     }
 
     /**
-     * @return array{latest: ?array<string, mixed>, results: list<array<string, mixed>>, source: string, counts: array<string, int>, error: ?string}
+     * Last day (IST) declared results only.
+     *
+     * @return array{latest: ?array<string, mixed>, results: list<array<string, mixed>>, source: string, counts: array<string, int>, error: ?string, date: string}
      */
     public function toResultsPayload(?string $date = null): array
     {
+        $explicitDate = $date;
+        $date = $date ?: now('Asia/Kolkata')->toDateString();
         $board = $this->board($date);
-        $mapped = collect($board['rows'])
-            ->map(fn (array $row) => $this->mapMarket($row))
-            ->filter()
-            ->values();
 
-        $sorted = $mapped
+        $mapped = collect($board['rows'])
+            ->map(fn (array $row) => $this->mapMarket($row, $date))
+            ->filter()
+            ->filter(fn (array $item) => $this->hasDeclaredResult($item))
             ->sort(function (array $a, array $b) {
-                $rank = $this->rank($b) <=> $this->rank($a);
-                if ($rank !== 0) {
-                    return $rank;
+                $ta = strtotime((string) ($a['drawn_at'] ?? '')) ?: 0;
+                $tb = strtotime((string) ($b['drawn_at'] ?? '')) ?: 0;
+                if ($tb !== $ta) {
+                    return $tb <=> $ta;
                 }
 
                 return strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
             })
             ->values();
 
-        $withResult = $sorted->filter(fn (array $item) => $this->hasDeclaredResult($item))->values();
+        // If today has nothing declared yet, use previous calendar day.
+        if ($mapped->isEmpty() && $explicitDate === null) {
+            $previous = now('Asia/Kolkata')->subDay()->toDateString();
+            $prevBoard = $this->board($previous);
+            $mapped = collect($prevBoard['rows'])
+                ->map(fn (array $row) => $this->mapMarket($row, $previous))
+                ->filter()
+                ->filter(fn (array $item) => $this->hasDeclaredResult($item))
+                ->sort(function (array $a, array $b) {
+                    $ta = strtotime((string) ($a['drawn_at'] ?? '')) ?: 0;
+                    $tb = strtotime((string) ($b['drawn_at'] ?? '')) ?: 0;
+                    if ($tb !== $ta) {
+                        return $tb <=> $ta;
+                    }
+
+                    return strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+                })
+                ->values();
+            $date = $previous;
+            $board['error'] = $board['error'] ?? $prevBoard['error'];
+        }
 
         return [
-            'latest' => $withResult->first() ?? $sorted->first(),
-            'results' => $sorted->all(),
-            'declared' => $withResult->all(),
+            'latest' => $mapped->first(),
+            'results' => $mapped->all(),
+            'declared' => $mapped->all(),
+            'date' => $date,
             'source' => 'sattamatkaapi.live',
             'counts' => [
-                'total' => $sorted->count(),
-                'declared' => $withResult->count(),
-                'open' => $sorted->where('status', 'open')->count(),
-                'pending' => $sorted->where('status', 'pending')->count(),
-                'holiday' => $sorted->whereIn('status', ['holiday', 'off_today'])->count(),
+                'total' => $mapped->count(),
+                'declared' => $mapped->count(),
+                'open' => $mapped->where('status', 'open')->count(),
+                'pending' => 0,
+                'holiday' => 0,
             ],
             'error' => $board['error'],
         ];
@@ -80,31 +105,10 @@ class SattaMatkaApi
     }
 
     /**
-     * @param  array<string, mixed>  $item
-     */
-    protected function rank(array $item): int
-    {
-        if ($this->hasDeclaredResult($item) && ($item['is_complete'] ?? false)) {
-            return 100;
-        }
-        if ($this->hasDeclaredResult($item)) {
-            return 80;
-        }
-        if (($item['status'] ?? '') === 'open') {
-            return 60;
-        }
-        if (($item['status'] ?? '') === 'pending') {
-            return 40;
-        }
-
-        return 0;
-    }
-
-    /**
      * @param  array<string, mixed>  $row
      * @return array<string, mixed>|null
      */
-    protected function mapMarket(array $row): ?array
+    protected function mapMarket(array $row, ?string $date = null): ?array
     {
         $nested = is_array($row['result'] ?? null) ? $row['result'] : [];
 
@@ -137,8 +141,10 @@ class SattaMatkaApi
             ?? $nested['publishedAt']
             ?? null;
 
-        if (! $drawnAt && ! empty($row['resultDate'])) {
-            $drawnAt = $row['resultDate'].'T00:00:00+05:30';
+        $resultDate = $row['resultDate'] ?? $row['marketDate'] ?? $date;
+
+        if (! $drawnAt && $resultDate) {
+            $drawnAt = $resultDate.'T00:00:00+05:30';
         }
 
         $status = $row['status'] ?? $row['boardState'] ?? 'pending';
@@ -147,6 +153,7 @@ class SattaMatkaApi
             'id' => $id ?? $row['slug'] ?? $name,
             'slug' => $row['slug'] ?? null,
             'name' => $name,
+            'date' => $resultDate,
             'drawn_at' => $drawnAt,
             'open_pana' => $openPana,
             'close_pana' => $closePana,

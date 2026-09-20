@@ -18,11 +18,24 @@ function Cell({ label, value }) {
     );
 }
 
+function formatDay(date) {
+    if (!date) return '';
+    try {
+        return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+        });
+    } catch {
+        return date;
+    }
+}
+
 export default function Result() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [filter, setFilter] = useState('all');
 
     const load = useCallback(() => {
         const url =
@@ -56,15 +69,7 @@ export default function Result() {
         return () => clearInterval(timer);
     }, [load]);
 
-    const rows = (data?.results || []).filter((row) => {
-        if (filter === 'declared') {
-            return row.open_pana || row.jodi || row.close_pana || row.result_string;
-        }
-        if (filter === 'live') {
-            return row.status === 'open' || row.status === 'pending';
-        }
-        return true;
-    });
+    const rows = data?.results || [];
 
     return (
         <AuthenticatedLayout>
@@ -72,37 +77,22 @@ export default function Result() {
 
             <div className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-8 lg:px-8">
                 <PageHeader
-                    eyebrow="Live board"
+                    eyebrow="Last day"
                     title="Results"
-                    subtitle="Live market board from Satta Matka API (auto refresh 30s)."
+                    subtitle={
+                        data?.date
+                            ? `Only last day declared records · ${formatDay(data.date)}`
+                            : 'Only last day declared records (auto refresh 30s).'
+                    }
                 />
 
                 <div className="mb-4 flex flex-wrap items-center gap-2">
-                    {[
-                        { id: 'all', label: 'All' },
-                        { id: 'declared', label: 'Declared' },
-                        { id: 'live', label: 'Live' },
-                    ].map((tab) => (
-                        <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setFilter(tab.id)}
-                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-                                filter === tab.id
-                                    ? 'bg-gold text-navy-dark'
-                                    : 'bg-white/5 text-app-muted ring-1 ring-white/10 hover:bg-white/10'
-                            }`}
-                        >
-                            {tab.label}
-                            {tab.id === 'all' && data?.counts?.total != null
-                                ? ` (${data.counts.total})`
-                                : ''}
-                            {tab.id === 'declared' &&
-                            data?.counts?.declared != null
-                                ? ` (${data.counts.declared})`
-                                : ''}
-                        </button>
-                    ))}
+                    <span className="rounded-xl bg-gold px-3 py-1.5 text-xs font-semibold text-navy-dark">
+                        Last day
+                        {data?.counts?.declared != null
+                            ? ` (${data.counts.declared})`
+                            : ''}
+                    </span>
                     <button
                         type="button"
                         onClick={() => {
@@ -124,13 +114,16 @@ export default function Result() {
                 {!loading && data?.latest && (
                     <section className="mb-6 overflow-hidden rounded-2xl bg-card p-5 text-white shadow-sm ring-1 ring-gold/25 sm:p-6">
                         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                            Latest / featured
+                            Latest record
                         </p>
                         <h2 className="mt-2 font-display text-xl font-semibold">
                             {data.latest.name}
                         </h2>
                         <p className="mt-1 text-sm text-white/70">
                             {[
+                                data.latest.date
+                                    ? formatDay(data.latest.date)
+                                    : null,
                                 data.latest.open_time && data.latest.close_time
                                     ? `${data.latest.open_time} – ${data.latest.close_time}`
                                     : null,
@@ -152,7 +145,7 @@ export default function Result() {
 
                 <div className="space-y-3">
                     {loading
-                        ? [1, 2, 3, 4].map((i) => (
+                        ? [1, 2, 3].map((i) => (
                               <div
                                   key={i}
                                   className="h-28 animate-pulse rounded-2xl bg-card ring-1 ring-white/10"
@@ -170,6 +163,9 @@ export default function Result() {
                                           </p>
                                           <p className="mt-0.5 text-xs text-app-muted">
                                               {[
+                                                  result.date
+                                                      ? formatDay(result.date)
+                                                      : null,
                                                   result.open_time &&
                                                   result.close_time
                                                       ? `${result.open_time} – ${result.close_time}`
@@ -201,7 +197,7 @@ export default function Result() {
 
                     {!loading && rows.length === 0 && !error && (
                         <p className="rounded-2xl bg-card px-4 py-8 text-center text-sm text-app-muted ring-1 ring-white/10">
-                            No markets in this filter yet.
+                            Last day ke liye abhi koi declared result nahi mila.
                         </p>
                     )}
                 </div>
