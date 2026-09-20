@@ -7,80 +7,97 @@ use Illuminate\Support\Facades\Log;
 
 class SattaMatkaApi
 {
+    /**
+     * @return array{rows: list<array<string, mixed>>, error: ?string}
+     */
     public function board(?string $date = null): array
     {
-        $base = rtrim((string) config('services.sattamatka.base_url'), '/');
-        $url = $base.'/api/results/board';
+        $payload = $this->getJson('/api/results/board', array_filter([
+            'date' => $date,
+        ]));
 
-        $headers = [
-            'Accept' => 'application/json',
+        if ($payload['error'] && empty($payload['data'])) {
+            return ['rows' => [], 'error' => $payload['error']];
+        }
+
+        $rows = is_array($payload['data']) ? $payload['data'] : [];
+
+        return [
+            'rows' => $rows,
+            'error' => $payload['error'],
         ];
-
-        $apiKey = config('services.sattamatka.api_key');
-        if (is_string($apiKey) && $apiKey !== '') {
-            $headers['Authorization'] = 'Bearer '.$apiKey;
-        }
-
-        $query = [];
-        if ($date) {
-            $query['date'] = $date;
-        }
-
-        try {
-            $response = Http::timeout(12)
-                ->withHeaders($headers)
-                ->get($url, $query);
-
-            if (! $response->successful()) {
-                Log::warning('SattaMatka board request failed', [
-                    'status' => $response->status(),
-                    'body' => $response->body(),
-                ]);
-
-                return [];
-            }
-
-            $payload = $response->json();
-
-            return is_array($payload['data'] ?? null) ? $payload['data'] : [];
-        } catch (\Throwable $e) {
-            Log::warning('SattaMatka board exception', [
-                'message' => $e->getMessage(),
-            ]);
-
-            return [];
-        }
     }
 
     /**
-     * Map board rows into Results page / dashboard shape.
-     *
-     * @param  list<array<string, mixed>>  $rows
-     * @return array{latest: ?array<string, mixed>, results: list<array<string, mixed>>}
+     * @return array{latest: ?array<string, mixed>, results: list<array<string, mixed>>, source: string, counts: array<string, int>, error: ?string}
      */
-    public function toResultsPayload(array $rows): array
+    public function toResultsPayload(?string $date = null): array
     {
-        $mapped = collect($rows)
+        $board = $this->board($date);
+        $mapped = collect($board['rows'])
             ->map(fn (array $row) => $this->mapMarket($row))
             ->filter()
             ->values();
 
-        $withResult = $mapped
-            ->filter(fn (array $item) => filled($item['result_string']) || filled($item['jodi']) || filled($item['open_pana']))
-            ->sortByDesc(fn (array $item) => $item['drawn_at'] ?? '')
+        $sorted = $mapped
+            ->sort(function (array $a, array $b) {
+                $rank = $this->rank($b) <=> $this->rank($a);
+                if ($rank !== 0) {
+                    return $rank;
+                }
+
+                return strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+            })
             ->values();
 
-        $list = $withResult->isNotEmpty()
-            ? $withResult
-            : $mapped->take(20)->values();
-
-        $latest = $list->first();
+        $withResult = $sorted->filter(fn (array $item) => $this->hasDeclaredResult($item))->values();
 
         return [
-            'latest' => $latest,
-            'results' => $list->all(),
+            'latest' => $withResult->first() ?? $sorted->first(),
+            'results' => $sorted->all(),
+            'declared' => $withResult->all(),
             'source' => 'sattamatkaapi.live',
+            'counts' => [
+                'total' => $sorted->count(),
+                'declared' => $withResult->count(),
+                'open' => $sorted->where('status', 'open')->count(),
+                'pending' => $sorted->where('status', 'pending')->count(),
+                'holiday' => $sorted->whereIn('status', ['holiday', 'off_today'])->count(),
+            ],
+            'error' => $board['error'],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    protected function hasDeclaredResult(array $item): bool
+    {
+        return filled($item['result_string'] ?? null)
+            || filled($item['open_pana'] ?? null)
+            || filled($item['jodi'] ?? null)
+            || filled($item['close_pana'] ?? null);
+    }
+
+    /**
+     * @param  array<string, mixed>  $item
+     */
+    protected function rank(array $item): int
+    {
+        if ($this->hasDeclaredResult($item) && ($item['is_complete'] ?? false)) {
+            return 100;
+        }
+        if ($this->hasDeclaredResult($item)) {
+            return 80;
+        }
+        if (($item['status'] ?? '') === 'open') {
+            return 60;
+        }
+        if (($item['status'] ?? '') === 'pending') {
+            return 40;
+        }
+
+        return 0;
     }
 
     /**
@@ -89,17 +106,23 @@ class SattaMatkaApi
      */
     protected function mapMarket(array $row): ?array
     {
+        $nested = is_array($row['result'] ?? null) ? $row['result'] : [];
+
         $id = $row['marketId'] ?? $row['id'] ?? null;
-        $name = $row['name'] ?? $row['marketName'] ?? $row['market'] ?? null;
+        $name = $row['name']
+            ?? $row['marketName']
+            ?? $row['canonicalName']
+            ?? $row['market']
+            ?? null;
 
         if (! $name) {
             return null;
         }
 
-        $openPana = $row['openPana'] ?? null;
-        $closePana = $row['closePana'] ?? null;
-        $jodi = $row['jodi'] ?? null;
-        $resultString = $row['resultString'] ?? null;
+        $openPana = $row['openPana'] ?? $nested['openPana'] ?? null;
+        $closePana = $row['closePana'] ?? $nested['closePana'] ?? null;
+        $jodi = $row['jodi'] ?? $nested['jodi'] ?? null;
+        $resultString = $row['resultString'] ?? $nested['resultString'] ?? null;
 
         if (! $resultString && ($openPana || $jodi || $closePana)) {
             $resultString = collect([$openPana, $jodi, $closePana])
@@ -111,6 +134,7 @@ class SattaMatkaApi
             ?? $row['resultTimestamp']
             ?? $row['boardTimestamp']
             ?? $row['updatedAt']
+            ?? $nested['publishedAt']
             ?? null;
 
         if (! $drawnAt && ! empty($row['resultDate'])) {
@@ -132,7 +156,7 @@ class SattaMatkaApi
             'status_label' => $row['statusLabel'] ?? $row['boardLabel'] ?? null,
             'open_time' => $row['openTime'] ?? null,
             'close_time' => $row['closeTime'] ?? null,
-            'is_complete' => (bool) ($row['isComplete'] ?? false),
+            'is_complete' => (bool) ($row['isComplete'] ?? $nested['isComplete'] ?? false),
             'prize' => null,
             'winners' => null,
             'numbers' => $this->digitsFromResult($resultString, $openPana, $jodi, $closePana),
@@ -156,5 +180,59 @@ class SattaMatkaApi
         }
 
         return $parts;
+    }
+
+    /**
+     * @param  array<string, mixed>  $query
+     * @return array{data: mixed, error: ?string}
+     */
+    protected function getJson(string $path, array $query = []): array
+    {
+        $base = rtrim((string) config('services.sattamatka.base_url'), '/');
+        $url = $base.$path;
+
+        $headers = [
+            'Accept' => 'application/json',
+            'User-Agent' => 'UpDown/1.0',
+        ];
+
+        $apiKey = trim((string) config('services.sattamatka.api_key', ''));
+        if ($apiKey !== '') {
+            $headers['Authorization'] = 'Bearer '.$apiKey;
+            $headers['X-API-Key'] = $apiKey;
+        }
+
+        try {
+            $response = Http::timeout(20)
+                ->retry(2, 250)
+                ->withHeaders($headers)
+                ->acceptJson()
+                ->get($url, $query);
+
+            if (! $response->successful()) {
+                $error = 'SMA HTTP '.$response->status();
+                Log::warning('SattaMatka request failed', [
+                    'url' => $url,
+                    'status' => $response->status(),
+                    'body' => mb_substr($response->body(), 0, 500),
+                ]);
+
+                return ['data' => [], 'error' => $error];
+            }
+
+            $json = $response->json();
+
+            return [
+                'data' => $json['data'] ?? $json,
+                'error' => null,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('SattaMatka exception', [
+                'url' => $url,
+                'message' => $e->getMessage(),
+            ]);
+
+            return ['data' => [], 'error' => $e->getMessage()];
+        }
     }
 }

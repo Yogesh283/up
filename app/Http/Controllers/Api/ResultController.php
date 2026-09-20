@@ -11,8 +11,7 @@ class ResultController extends Controller
 {
     public function index(Request $request, SattaMatkaApi $api): JsonResponse
     {
-        $board = $api->board($request->query('date'));
-        $payload = $api->toResultsPayload($board);
+        $payload = $api->toResultsPayload($request->query('date'));
 
         return response()->json($payload);
     }

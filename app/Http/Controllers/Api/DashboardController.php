@@ -18,10 +18,18 @@ class DashboardController extends Controller
         $winsCount = $bets->where('status', 'won')->count();
         $balance = (float) $user->wallet_balance;
         $draws = Draws::open();
-        $recentResults = collect($api->toResultsPayload($api->board())['results'] ?? [])
-            ->take(5)
+        $resultsPayload = $api->toResultsPayload();
+        $recentResults = collect($resultsPayload['declared'] ?? [])
+            ->take(8)
             ->values()
             ->all();
+
+        if ($recentResults === []) {
+            $recentResults = collect($resultsPayload['results'] ?? [])
+                ->take(8)
+                ->values()
+                ->all();
+        }
 
         return response()->json([
             'user' => [
