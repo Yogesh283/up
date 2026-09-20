@@ -40,6 +40,65 @@ class SattaMatkaApi
         'parel',
         'banglore',
         'bangalore',
+        'delhi',
+        'ghaziabad',
+        'gaziabad',
+        'ganesh',
+        'desawar',
+        'faridabad',
+        'gali',
+        'noida',
+    ];
+
+    /**
+     * Regional Satta King style markets — always pinned at top.
+     * Some exist in SMA (delhi-bazar); others are not in API yet (show XX).
+     *
+     * @var list<array{slug:string,name:string,open_time:string,close_time:string}>
+     */
+    protected array $featuredRegional = [
+        [
+            'slug' => 'desawar',
+            'name' => 'DESAWAR',
+            'open_time' => '05:00 AM',
+            'close_time' => '05:00 AM',
+        ],
+        [
+            'slug' => 'delhi-bazar',
+            'name' => 'DELHI BAZAR',
+            'open_time' => '03:10 PM',
+            'close_time' => '09:10 PM',
+        ],
+        [
+            'slug' => 'shri-ganesh',
+            'name' => 'SHRI GANESH',
+            'open_time' => '04:30 PM',
+            'close_time' => '04:30 PM',
+        ],
+        [
+            'slug' => 'faridabad',
+            'name' => 'FARIDABAD',
+            'open_time' => '06:00 PM',
+            'close_time' => '06:00 PM',
+        ],
+        [
+            'slug' => 'ghaziabad',
+            'name' => 'GHAZIABAD',
+            'open_time' => '08:30 PM',
+            'close_time' => '08:30 PM',
+        ],
+        [
+            'slug' => 'gali',
+            'name' => 'GALI',
+            'open_time' => '11:15 PM',
+            'close_time' => '11:15 PM',
+        ],
+        [
+            'slug' => 'noida-king',
+            'name' => 'NOIDA KING',
+            'open_time' => '01:15 AM',
+            'close_time' => '01:15 AM',
+        ],
     ];
 
     /**
@@ -120,8 +179,11 @@ class SattaMatkaApi
             })
             ->values();
 
+        $sorted = $this->pinFeaturedRegionals($sorted, $today, $yesterday);
+
         $india = $sorted->where('is_india', true)->values();
         $others = $sorted->where('is_india', false)->values();
+        $featured = $sorted->where('is_featured', true)->values();
         $declaredToday = $sorted->filter(fn (array $r) => ($r['today_result'] ?? 'XX') !== 'XX')->values();
 
         $latest = $sorted
@@ -156,6 +218,7 @@ class SattaMatkaApi
             'results' => $sorted->all(),
             'india_results' => $india->all(),
             'other_results' => $others->all(),
+            'featured_results' => $featured->all(),
             'declared' => $declaredToday->all(),
             'date' => $today,
             'today_date' => $today,
@@ -170,6 +233,7 @@ class SattaMatkaApi
             'source' => 'sattamatkaapi.live',
             'counts' => [
                 'total' => $sorted->count(),
+                'featured' => $featured->count(),
                 'india' => $india->count(),
                 'other' => $others->count(),
                 'declared' => $declaredToday->count(),
@@ -180,6 +244,117 @@ class SattaMatkaApi
             ],
             'error' => $error,
         ];
+    }
+
+    /**
+     * Pin Desawar / Delhi Bazar / Shri Ganesh / Ghaziabad etc. at the top.
+     *
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $sorted
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    protected function pinFeaturedRegionals($sorted, string $today, string $yesterday)
+    {
+        $bySlug = $sorted->keyBy(fn (array $row) => strtolower((string) ($row['slug'] ?? '')));
+        $byName = $sorted->keyBy(fn (array $row) => strtolower(trim((string) ($row['name'] ?? ''))));
+
+        $featured = collect();
+        $usedKeys = [];
+
+        foreach ($this->featuredRegional as $index => $market) {
+            $slug = strtolower($market['slug']);
+            $name = strtolower($market['name']);
+
+            $existing = $bySlug->get($slug)
+                ?? $byName->get($name)
+                ?? $byName->get(strtolower(str_replace('-', ' ', $slug)));
+
+            if ($existing) {
+                $row = array_merge($existing, [
+                    'is_featured' => true,
+                    'is_india' => true,
+                    'is_regional' => true,
+                    'featured_order' => $index,
+                    'name' => $market['name'],
+                    'open_time' => $existing['open_time'] ?: $market['open_time'],
+                    'close_time' => $existing['close_time'] ?: $market['close_time'],
+                ]);
+                $usedKeys[] = $this->marketKey($existing);
+            } else {
+                $row = $this->makeRegionalStub($market, $today, $yesterday, $index);
+            }
+
+            $featured->push($row);
+        }
+
+        $rest = $sorted
+            ->reject(fn (array $row) => in_array($this->marketKey($row), $usedKeys, true))
+            ->reject(function (array $row) {
+                $slug = strtolower((string) ($row['slug'] ?? ''));
+                $name = strtolower((string) ($row['name'] ?? ''));
+
+                foreach ($this->featuredRegional as $market) {
+                    if ($slug === strtolower($market['slug']) || $name === strtolower($market['name'])) {
+                        return true;
+                    }
+                }
+
+                return false;
+            })
+            ->map(fn (array $row) => array_merge($row, [
+                'is_featured' => false,
+                'featured_order' => 9999,
+            ]))
+            ->values();
+
+        return $featured->concat($rest)->values();
+    }
+
+    /**
+     * @param  array{slug:string,name:string,open_time:string,close_time:string}  $market
+     * @return array<string, mixed>
+     */
+    protected function makeRegionalStub(array $market, string $today, string $yesterday, int $order): array
+    {
+        $base = [
+            'id' => 'regional-'.$market['slug'],
+            'slug' => $market['slug'],
+            'name' => $market['name'],
+            'date' => $today,
+            'drawn_at' => null,
+            'display_order' => $order,
+            'featured_order' => $order,
+            'is_india' => true,
+            'is_featured' => true,
+            'is_regional' => true,
+            'has_result' => false,
+            'open_pana' => null,
+            'close_pana' => null,
+            'jodi' => null,
+            'open_ank' => null,
+            'close_ank' => null,
+            'result_string' => null,
+            'full_result' => '***-***-***',
+            'cases' => [
+                'open' => ['label' => 'Open', 'value' => null, 'ank' => null, 'display' => '***'],
+                'jodi' => ['label' => 'Jodi', 'value' => null, 'ank' => null, 'display' => '***'],
+                'close' => ['label' => 'Close', 'value' => null, 'ank' => null, 'display' => '***'],
+            ],
+            'status' => 'pending',
+            'status_label' => 'Awaiting API market',
+            'open_time' => $market['open_time'],
+            'close_time' => $market['close_time'],
+            'is_complete' => false,
+            'prize' => null,
+            'winners' => null,
+            'numbers' => [],
+            'yesterday' => null,
+            'today' => null,
+            'last_result' => 'XX',
+            'today_result' => 'XX',
+            'api_missing' => true,
+        ];
+
+        return $base;
     }
 
     /**
