@@ -69,7 +69,6 @@ class BetController extends Controller
         }
 
         $amount = round((float) $validated['amount'], 2);
-        $multiplier = (float) $typeCfg['multiplier'];
         $user = $request->user();
 
         if ((float) $user->wallet_balance < $amount) {
