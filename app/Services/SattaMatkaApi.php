@@ -106,20 +106,24 @@ class SattaMatkaApi
      */
     public function board(?string $date = null): array
     {
-        $payload = $this->getJson('/api/results/board', array_filter([
-            'date' => $date,
-        ]));
+        $date = $date ?: now('Asia/Kolkata')->toDateString();
 
-        if ($payload['error'] && empty($payload['data'])) {
-            return ['rows' => [], 'error' => $payload['error']];
-        }
+        return Cache::remember('sma.board.'.$date, 90, function () use ($date) {
+            $payload = $this->getJson('/api/results/board', [
+                'date' => $date,
+            ]);
 
-        $rows = is_array($payload['data']) ? $payload['data'] : [];
+            if ($payload['error'] && empty($payload['data'])) {
+                return ['rows' => [], 'error' => $payload['error']];
+            }
 
-        return [
-            'rows' => $rows,
-            'error' => $payload['error'],
-        ];
+            $rows = is_array($payload['data']) ? $payload['data'] : [];
+
+            return [
+                'rows' => $rows,
+                'error' => $payload['error'],
+            ];
+        });
     }
 
     /**
@@ -134,32 +138,59 @@ class SattaMatkaApi
         $orders = $this->displayOrders();
 
         $todayBoard = $this->board($today);
-        $yesterdayBoard = $this->board($yesterday);
-
         $todayMapped = $this->mapBoardRows($todayBoard['rows'], $today, $orders)
             ->keyBy(fn (array $row) => $this->marketKey($row));
-        $yesterdayMapped = $this->mapBoardRows($yesterdayBoard['rows'], $yesterday, $orders)
-            ->keyBy(fn (array $row) => $this->marketKey($row));
 
-        $keys = $todayMapped->keys()->merge($yesterdayMapped->keys())->unique()->values();
+        // Last-result lookback (handles weekend / holiday empty boards).
+        $lookbackMaps = [];
+        for ($i = 1; $i <= 2; $i++) {
+            $lookbackDate = \Carbon\Carbon::parse($today, 'Asia/Kolkata')->subDays($i)->toDateString();
+            $board = $this->board($lookbackDate);
+            $lookbackMaps[$lookbackDate] = $this->mapBoardRows($board['rows'], $lookbackDate, $orders)
+                ->keyBy(fn (array $row) => $this->marketKey($row));
+        }
 
-        $merged = $keys->map(function (string $key) use ($todayMapped, $yesterdayMapped) {
+        $yesterdayMapped = $lookbackMaps[$yesterday] ?? collect();
+
+        $keys = $todayMapped->keys()
+            ->merge(collect($lookbackMaps)->flatMap(fn ($map) => $map->keys()))
+            ->unique()
+            ->values();
+
+        $merged = $keys->map(function (string $key) use ($todayMapped, $lookbackMaps, $yesterday) {
             $todayRow = $todayMapped->get($key);
-            $yesterdayRow = $yesterdayMapped->get($key);
-            $base = $todayRow ?? $yesterdayRow;
+            $yesterdayRow = ($lookbackMaps[$yesterday] ?? collect())->get($key);
+
+            $lastDisplay = 'XX';
+            $lastDate = $yesterday;
+            $lastRow = $yesterdayRow;
+
+            foreach ($lookbackMaps as $lookbackDate => $map) {
+                $candidate = $map->get($key);
+                $display = $this->dayDisplay($candidate, always: true);
+                if ($display !== 'XX') {
+                    $lastDisplay = $display;
+                    $lastDate = $lookbackDate;
+                    $lastRow = $candidate;
+                    break;
+                }
+            }
+
+            $base = $todayRow ?? $lastRow ?? $yesterdayRow;
             if (! $base) {
                 return null;
             }
 
-            $lastDisplay = $this->dayDisplay($yesterdayRow, always: true);
             $todayDisplay = $this->dayDisplay($todayRow, always: false);
 
             return array_merge($base, [
                 'yesterday' => $yesterdayRow,
                 'today' => $todayRow,
+                'last_row' => $lastRow,
                 'last_result' => $lastDisplay,
+                'last_result_date' => $lastDate,
                 'today_result' => $todayDisplay,
-                'has_result' => ($todayRow['has_result'] ?? false) || ($yesterdayRow['has_result'] ?? false),
+                'has_result' => ($todayRow['has_result'] ?? false) || ($lastDisplay !== 'XX'),
             ]);
         })->filter()->values();
 
@@ -180,17 +211,20 @@ class SattaMatkaApi
             ->values();
 
         $sorted = $this->pinFeaturedRegionals($sorted, $today, $yesterday);
+        // Only top rows — history calls are expensive.
+        $sorted = $this->enrichMissingLastResults($sorted, 20);
 
         $india = $sorted->where('is_india', true)->values();
         $others = $sorted->where('is_india', false)->values();
         $featured = $sorted->where('is_featured', true)->values();
         $declaredToday = $sorted->filter(fn (array $r) => ($r['today_result'] ?? 'XX') !== 'XX')->values();
+        $declaredLast = $sorted->filter(fn (array $r) => ($r['last_result'] ?? 'XX') !== 'XX')->values();
 
         $latest = $sorted
-            ->filter(fn (array $r) => ($r['today']['has_result'] ?? false) || ($r['yesterday']['has_result'] ?? false))
+            ->filter(fn (array $r) => ($r['today']['has_result'] ?? false) || ($r['last_result'] ?? 'XX') !== 'XX')
             ->sortByDesc(function (array $r) {
                 $t = $r['today']['drawn_at'] ?? null;
-                $y = $r['yesterday']['drawn_at'] ?? null;
+                $y = $r['last_row']['drawn_at'] ?? $r['yesterday']['drawn_at'] ?? null;
                 $ts = max(
                     $t ? (strtotime((string) $t) ?: 0) : 0,
                     $y ? (strtotime((string) $y) ?: 0) : 0,
@@ -199,10 +233,13 @@ class SattaMatkaApi
                 return $ts;
             })
             ->map(function (array $r) {
-                $src = ($r['today']['has_result'] ?? false) ? $r['today'] : $r['yesterday'];
+                $src = ($r['today']['has_result'] ?? false)
+                    ? $r['today']
+                    : ($r['last_row'] ?? $r['yesterday']);
 
                 return array_merge($src ?? $r, [
                     'last_result' => $r['last_result'],
+                    'last_result_date' => $r['last_result_date'] ?? null,
                     'today_result' => $r['today_result'],
                     'display_value' => ($r['today']['has_result'] ?? false)
                         ? $r['today_result']
@@ -211,7 +248,7 @@ class SattaMatkaApi
             })
             ->first();
 
-        $error = $todayBoard['error'] ?? $yesterdayBoard['error'];
+        $error = $todayBoard['error'] ?? null;
 
         return [
             'latest' => $latest,
@@ -224,12 +261,14 @@ class SattaMatkaApi
             'today_date' => $today,
             'yesterday_date' => $yesterday,
             'today_label' => $this->shortDayLabel($today),
-            'yesterday_label' => $this->shortDayLabel($yesterday),
+            'yesterday_label' => 'Last',
+            'yesterday_date_label' => $this->shortDayLabel($yesterday),
             'banner_text' => sprintf(
                 'Fast Results of %s & %s',
                 \Carbon\Carbon::parse($today)->format('F j, Y'),
                 \Carbon\Carbon::parse($yesterday)->format('F j, Y'),
             ),
+            'note' => 'Last column = latest declared result (uses previous days when '.$this->shortDayLabel($yesterday).' was holiday/empty). Today stays XX until declared.',
             'source' => 'sattamatkaapi.live',
             'counts' => [
                 'total' => $sorted->count(),
@@ -237,6 +276,7 @@ class SattaMatkaApi
                 'india' => $india->count(),
                 'other' => $others->count(),
                 'declared' => $declaredToday->count(),
+                'declared_last' => $declaredLast->count(),
                 'full' => $declaredToday->where('is_complete', true)->count(),
                 'open' => $sorted->filter(fn ($r) => ($r['today']['status'] ?? '') === 'open')->count(),
                 'pending' => $sorted->filter(fn ($r) => ($r['today_result'] ?? 'XX') === 'XX')->count(),
@@ -244,6 +284,41 @@ class SattaMatkaApi
             ],
             'error' => $error,
         ];
+    }
+
+    /**
+     * Fill Last column from history when board lookback is empty (weekends/holidays).
+     *
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $sorted
+     * @return \Illuminate\Support\Collection<int, array<string, mixed>>
+     */
+    protected function enrichMissingLastResults($sorted, int $limit = 60)
+    {
+        return $sorted->values()->map(function (array $row, int $index) use ($limit) {
+            if ($index >= $limit) {
+                return $row;
+            }
+
+            if (($row['last_result'] ?? 'XX') !== 'XX') {
+                return $row;
+            }
+
+            $slug = strtolower((string) ($row['slug'] ?? ''));
+            if ($slug === '' || str_starts_with($slug, 'regional-')) {
+                return $row;
+            }
+
+            $fromHistory = $this->lastResultFromHistory($slug);
+            if (! $fromHistory) {
+                return $row;
+            }
+
+            return array_merge($row, [
+                'last_result' => $fromHistory['display'],
+                'last_result_date' => $fromHistory['date'],
+                'has_result' => true,
+            ]);
+        });
     }
 
     /**
@@ -278,9 +353,26 @@ class SattaMatkaApi
                     'open_time' => $existing['open_time'] ?: $market['open_time'],
                     'close_time' => $existing['close_time'] ?: $market['close_time'],
                 ]);
+
+                if (($row['last_result'] ?? 'XX') === 'XX') {
+                    $fromHistory = $this->lastResultFromHistory($slug);
+                    if ($fromHistory) {
+                        $row['last_result'] = $fromHistory['display'];
+                        $row['last_result_date'] = $fromHistory['date'];
+                        $row['has_result'] = true;
+                    }
+                }
+
                 $usedKeys[] = $this->marketKey($existing);
             } else {
                 $row = $this->makeRegionalStub($market, $today, $yesterday, $index);
+                $fromHistory = $this->lastResultFromHistory($slug);
+                if ($fromHistory) {
+                    $row['last_result'] = $fromHistory['display'];
+                    $row['last_result_date'] = $fromHistory['date'];
+                    $row['has_result'] = true;
+                    $row['api_missing'] = false;
+                }
             }
 
             $featured->push($row);
@@ -355,6 +447,99 @@ class SattaMatkaApi
         ];
 
         return $base;
+    }
+
+    /**
+     * @return array{display:string,date:string}|null
+     */
+    protected function lastResultFromHistory(string $slug): ?array
+    {
+        $slug = trim($slug);
+        if ($slug === '') {
+            return null;
+        }
+
+        return Cache::remember('sma.history.last.'.$slug, 300, function () use ($slug) {
+            $from = now('Asia/Kolkata')->subDays(21)->toDateString();
+            $payload = $this->getJson('/api/results/history/'.$slug, [
+                'from' => $from,
+            ]);
+
+            $rows = is_array($payload['data']) ? $payload['data'] : [];
+            if ($rows === []) {
+                return null;
+            }
+
+            usort($rows, function ($a, $b) {
+                $da = (string) ($a['resultDate'] ?? $a['date'] ?? '');
+                $db = (string) ($b['resultDate'] ?? $b['date'] ?? '');
+
+                return strcmp($db, $da);
+            });
+
+            foreach ($rows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+
+                $display = $this->dayDisplayFromRaw($row);
+                if ($display === 'XX') {
+                    continue;
+                }
+
+                return [
+                    'display' => $display,
+                    'date' => (string) ($row['resultDate'] ?? $row['date'] ?? ''),
+                ];
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Build day cell from raw API row (board or history).
+     *
+     * @param  array<string, mixed>  $row
+     */
+    protected function dayDisplayFromRaw(array $row): string
+    {
+        $nested = is_array($row['result'] ?? null) ? $row['result'] : [];
+
+        $jodi = $this->strOrNull($row['jodi'] ?? $nested['jodi'] ?? null);
+        if ($jodi && ! str_contains($jodi, '*') && preg_match('/^\d{2}$/', $jodi)) {
+            return $jodi;
+        }
+
+        $openAnk = $this->strOrNull($row['openAnk'] ?? $nested['openAnk'] ?? null);
+        $closeAnk = $this->strOrNull($row['closeAnk'] ?? $nested['closeAnk'] ?? null);
+        if ($openAnk !== null && $closeAnk !== null) {
+            return $openAnk.$closeAnk;
+        }
+
+        if ($jodi) {
+            $clean = preg_replace('/\D/', '', $jodi) ?: '';
+            if (strlen($clean) >= 2) {
+                return substr($clean, 0, 2);
+            }
+        }
+
+        if ($openAnk !== null) {
+            return str_pad($openAnk, 2, '0', STR_PAD_LEFT);
+        }
+
+        $resultString = $this->strOrNull($row['resultString'] ?? $nested['resultString'] ?? null);
+        if ($resultString) {
+            $parts = preg_split('/[-–]/', $resultString) ?: [];
+            if (isset($parts[1])) {
+                $mid = preg_replace('/\D/', '', $parts[1]) ?: '';
+                if (strlen($mid) >= 2) {
+                    return substr($mid, 0, 2);
+                }
+            }
+        }
+
+        return 'XX';
     }
 
     /**

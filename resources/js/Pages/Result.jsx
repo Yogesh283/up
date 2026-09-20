@@ -143,6 +143,12 @@ export default function Result() {
                     </div>
                 )}
 
+                {!loading && data?.note && (
+                    <p className="mb-3 text-center text-xs text-app-muted">
+                        {data.note}
+                    </p>
+                )}
+
                 {!loading && latest && (
                     <section className="mb-4 overflow-hidden rounded-2xl bg-[#ffe566] p-4 text-black shadow-sm ring-1 ring-black/10">
                         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/60">
@@ -215,11 +221,16 @@ export default function Result() {
                             Regional Offline Draw Results
                         </span>
                         <div className="flex shrink-0 items-center gap-4 pr-1 sm:gap-8 sm:pr-2">
-                            <span className="w-12 text-center sm:w-14">
-                                {yesterdayLabel}
+                            <span className="w-12 text-center leading-tight sm:w-14">
+                                <span className="block">{yesterdayLabel}</span>
+                                {data?.yesterday_date_label ? (
+                                    <span className="block text-[9px] font-normal opacity-70">
+                                        {data.yesterday_date_label}
+                                    </span>
+                                ) : null}
                             </span>
-                            <span className="w-12 text-center sm:w-14">
-                                {todayLabel}
+                            <span className="w-12 text-center leading-tight sm:w-14">
+                                <span className="block">{todayLabel}</span>
                             </span>
                         </div>
                     </div>
