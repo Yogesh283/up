@@ -1,56 +1,8 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
-import { formatDateTime } from '@/lib/format';
 import { Head } from '@inertiajs/react';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
-function CaseCell({ label, caseNo, value, ank }) {
-    return (
-        <div className="rounded-xl bg-navy-dark/60 px-2 py-3 text-center ring-1 ring-white/10">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-gold/80">
-                Case {caseNo}
-            </p>
-            <p className="mt-1 text-[10px] uppercase tracking-wide text-app-muted">
-                {label}
-            </p>
-            <p className="mt-1.5 font-display text-base font-semibold text-gold sm:text-lg">
-                {value || '***'}
-            </p>
-            {ank ? (
-                <p className="mt-0.5 text-[10px] text-app-muted">Ank {ank}</p>
-            ) : null}
-        </div>
-    );
-}
-
-function ThreeCases({ result, large = false }) {
-    const open = result.cases?.open;
-    const jodi = result.cases?.jodi;
-    const close = result.cases?.close;
-
-    return (
-        <div className={`grid grid-cols-3 gap-2 ${large ? 'sm:gap-3' : ''}`}>
-            <CaseCell
-                caseNo={1}
-                label={open?.label || 'Open'}
-                value={open?.display || result.open_pana}
-                ank={open?.ank || result.open_ank}
-            />
-            <CaseCell
-                caseNo={2}
-                label={jodi?.label || 'Jodi'}
-                value={jodi?.display || result.jodi}
-            />
-            <CaseCell
-                caseNo={3}
-                label={close?.label || 'Close'}
-                value={close?.display || result.close_pana}
-                ank={close?.ank || result.close_ank}
-            />
-        </div>
-    );
-}
 
 function formatDay(date) {
     if (!date) return '';
@@ -66,47 +18,98 @@ function formatDay(date) {
     }
 }
 
-function MarketCard({ result }) {
+function pad2(value) {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return null;
+    if (digits.length === 1) return digits.padStart(2, '0');
+    return digits.slice(0, 2);
+}
+
+/** Screenshot-style left / right numbers (XX if pending). */
+function rowNumbers(result) {
+    let left = pad2(result.open_ank);
+    let right = pad2(result.close_ank);
+
+    const raw = String(result.result_string || result.full_result || '');
+    const parts = raw
+        .split(/[-–]/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+    if (parts.length >= 1 && !left) {
+        const openPart = parts[0].replace(/\*/g, '');
+        left = pad2(openPart) || pad2(result.open_pana);
+    }
+
+    if (parts.length >= 3 && !right) {
+        const closePart = parts[2].replace(/\*/g, '');
+        if (closePart && !parts[2].includes('*')) {
+            right = pad2(closePart) || pad2(result.close_pana);
+        }
+    } else if (parts.length === 2 && !right) {
+        const second = parts[1].replace(/\*/g, '');
+        if (second && !parts[1].includes('*') && second.length >= 2) {
+            right = pad2(second);
+        }
+    }
+
+    const jodi = String(result.jodi || '');
+    if (!left && /^\d{2}$/.test(jodi)) {
+        left = jodi;
+    }
+
+    return {
+        left: left || 'XX',
+        right: right || 'XX',
+    };
+}
+
+function chartUrl(result) {
+    if (!result?.slug) return 'https://sattamatkaapi.live/live-results';
+    return `https://sattamatkaapi.live/live-results`;
+}
+
+function ResultRow({ result, index }) {
+    const { left, right } = rowNumbers(result);
+    const highlight = Boolean(result.is_india || result.has_result);
+    const timeLabel = result.close_time || result.open_time || '—';
+
     return (
-        <article className="rounded-2xl bg-card p-4 shadow-sm ring-1 ring-white/10 sm:p-5">
-            <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-semibold text-white">
-                            {result.name}
-                        </p>
-                        {result.is_india ? (
-                            <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold ring-1 ring-gold/25">
-                                India
-                            </span>
-                        ) : null}
-                        {result.is_complete ? (
-                            <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success ring-1 ring-success/25">
-                                Full
-                            </span>
-                        ) : null}
-                    </div>
-                    <p className="mt-0.5 text-xs text-app-muted">
-                        {[
-                            result.date ? formatDay(result.date) : null,
-                            result.open_time && result.close_time
-                                ? `${result.open_time} – ${result.close_time}`
-                                : null,
-                            result.status_label || result.status,
-                        ]
-                            .filter(Boolean)
-                            .join(' · ')}
-                    </p>
-                    <p className="mt-1 font-display text-sm font-semibold tracking-wide text-white">
-                        {result.full_result || '***-***-***'}
-                    </p>
-                </div>
-                <p className="shrink-0 rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gold ring-1 ring-gold/20">
-                    {result.status}
+        <div
+            className={`flex items-center gap-2 border-b border-black/10 px-3 py-3 sm:gap-3 sm:px-4 ${
+                highlight ? 'bg-[#ffe566]' : index % 2 === 0 ? 'bg-white' : 'bg-neutral-100'
+            }`}
+        >
+            <span className="w-7 shrink-0 text-sm font-bold text-black/70 sm:w-8 sm:text-base">
+                {index + 1}.
+            </span>
+
+            <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold uppercase leading-tight tracking-wide text-black sm:text-base">
+                    {result.name}
+                </p>
+                <p className="mt-0.5 text-[11px] text-black/80 sm:text-xs">
+                    at {timeLabel}{' '}
+                    <a
+                        href={chartUrl(result)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-medium text-blue-600 underline"
+                    >
+                        Record Chart
+                    </a>
                 </p>
             </div>
-            <ThreeCases result={result} />
-        </article>
+
+            <div className="flex shrink-0 items-center gap-4 pr-1 sm:gap-8 sm:pr-2">
+                <span className="w-10 text-center text-xl font-bold tabular-nums text-black sm:w-12 sm:text-2xl">
+                    {left}
+                </span>
+                <span className="w-10 text-center text-xl font-bold tabular-nums text-black sm:w-12 sm:text-2xl">
+                    {right}
+                </span>
+            </div>
+        </div>
     );
 }
 
@@ -114,7 +117,7 @@ export default function Result() {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [tab, setTab] = useState('india');
+    const [search, setSearch] = useState('');
 
     const load = useCallback(() => {
         const url =
@@ -149,12 +152,18 @@ export default function Result() {
     }, [load]);
 
     const rows = useMemo(() => {
-        if (!data) return [];
-        if (tab === 'india') return data.india_results || [];
-        if (tab === 'declared') return data.declared || [];
-        if (tab === 'other') return data.other_results || [];
-        return data.results || [];
-    }, [data, tab]);
+        const list = data?.results || data?.india_results || [];
+        const q = search.trim().toLowerCase();
+        if (!q) return list;
+        return list.filter((row) =>
+            String(row.name || '')
+                .toLowerCase()
+                .includes(q),
+        );
+    }, [data, search]);
+
+    const latest = data?.latest;
+    const latestNums = latest ? rowNumbers(latest) : null;
 
     return (
         <AuthenticatedLayout>
@@ -162,63 +171,14 @@ export default function Result() {
 
             <div className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-8 lg:px-8">
                 <PageHeader
-                    eyebrow="India board"
+                    eyebrow="Live board"
                     title="Results"
                     subtitle={
                         data?.date
-                            ? `India markets on top · full Open / Jodi / Close · ${formatDay(data.date)}`
-                            : 'India markets on top with full three-case results.'
+                            ? `Search markets · numbered list · ${formatDay(data.date)}`
+                            : 'Search markets and view last results.'
                     }
                 />
-
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                    {[
-                        {
-                            id: 'india',
-                            label: 'India',
-                            count: data?.counts?.india,
-                        },
-                        {
-                            id: 'declared',
-                            label: 'Declared',
-                            count: data?.counts?.declared,
-                        },
-                        {
-                            id: 'all',
-                            label: 'All',
-                            count: data?.counts?.total,
-                        },
-                        {
-                            id: 'other',
-                            label: 'Other',
-                            count: data?.counts?.other,
-                        },
-                    ].map((item) => (
-                        <button
-                            key={item.id}
-                            type="button"
-                            onClick={() => setTab(item.id)}
-                            className={`rounded-xl px-3 py-1.5 text-xs font-semibold transition ${
-                                tab === item.id
-                                    ? 'bg-gold text-navy-dark'
-                                    : 'bg-white/5 text-app-muted ring-1 ring-white/10 hover:bg-white/10'
-                            }`}
-                        >
-                            {item.label}
-                            {item.count != null ? ` (${item.count})` : ''}
-                        </button>
-                    ))}
-                    <button
-                        type="button"
-                        onClick={() => {
-                            setLoading(true);
-                            load();
-                        }}
-                        className="ms-auto rounded-xl bg-white/5 px-3 py-1.5 text-xs font-semibold text-white ring-1 ring-white/10 hover:bg-white/10"
-                    >
-                        Refresh
-                    </button>
-                </div>
 
                 {error && (
                     <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -226,64 +186,93 @@ export default function Result() {
                     </div>
                 )}
 
-                {!loading && data?.latest && (
-                    <section className="mb-6 overflow-hidden rounded-2xl bg-card p-5 text-white shadow-sm ring-1 ring-gold/25 sm:p-6">
-                        <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/60">
-                                Last result
-                            </p>
-                            {data.latest.is_india ? (
-                                <span className="rounded-full bg-gold/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold ring-1 ring-gold/25">
-                                    India
-                                </span>
-                            ) : null}
-                        </div>
-                        <h2 className="mt-2 font-display text-xl font-semibold">
-                            {data.latest.name}
-                        </h2>
-                        <p className="mt-1 text-sm text-white/70">
-                            {[
-                                data.latest.date
-                                    ? formatDay(data.latest.date)
-                                    : null,
-                                data.latest.open_time && data.latest.close_time
-                                    ? `${data.latest.open_time} – ${data.latest.close_time}`
-                                    : null,
-                                data.latest.status,
-                                data.latest.drawn_at
-                                    ? formatDateTime(data.latest.drawn_at)
-                                    : null,
-                            ]
-                                .filter(Boolean)
-                                .join(' · ')}
+                {!loading && latest && (
+                    <section className="mb-4 overflow-hidden rounded-2xl bg-[#ffe566] p-4 text-black shadow-sm ring-1 ring-black/10">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/60">
+                            Last result
                         </p>
-                        <p className="mt-3 font-display text-2xl font-semibold tracking-wide text-gold">
-                            {data.latest.full_result || '***-***-***'}
-                        </p>
-                        <div className="mt-4">
-                            <ThreeCases result={data.latest} large />
+                        <div className="mt-2 flex items-center gap-3">
+                            <div className="min-w-0 flex-1">
+                                <p className="truncate text-base font-bold uppercase">
+                                    {latest.name}
+                                </p>
+                                <p className="text-xs text-black/70">
+                                    at {latest.close_time || latest.open_time || '—'}
+                                </p>
+                            </div>
+                            <span className="text-2xl font-bold tabular-nums">
+                                {latestNums.left}
+                            </span>
+                            <span className="text-2xl font-bold tabular-nums">
+                                {latestNums.right}
+                            </span>
                         </div>
                     </section>
                 )}
 
-                <div className="space-y-3">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <label className="relative block min-w-0 flex-1">
+                        <span className="sr-only">Search results</span>
+                        <input
+                            type="search"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                            placeholder="Search market name…"
+                            className="w-full rounded-xl border-0 bg-white px-4 py-3 text-sm text-black outline-none ring-1 ring-white/20 placeholder:text-neutral-500 focus:ring-2 focus:ring-gold"
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setLoading(true);
+                            load();
+                        }}
+                        className="rounded-xl bg-gold px-4 py-3 text-sm font-semibold text-navy-dark"
+                    >
+                        Refresh
+                    </button>
+                </div>
+
+                <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-white/10">
+                    <div className="flex items-center gap-2 border-b border-black/10 bg-neutral-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-black/60 sm:gap-3 sm:px-4">
+                        <span className="w-7 sm:w-8">#</span>
+                        <span className="min-w-0 flex-1">Market</span>
+                        <div className="flex shrink-0 items-center gap-4 pr-1 sm:gap-8 sm:pr-2">
+                            <span className="w-10 text-center sm:w-12">Open</span>
+                            <span className="w-10 text-center sm:w-12">Close</span>
+                        </div>
+                    </div>
+
                     {loading
-                        ? [1, 2, 3, 4].map((i) => (
+                        ? [1, 2, 3, 4, 5].map((i) => (
                               <div
                                   key={i}
-                                  className="h-36 animate-pulse rounded-2xl bg-card ring-1 ring-white/10"
+                                  className="h-16 animate-pulse border-b border-black/5 bg-neutral-100"
                               />
                           ))
-                        : rows.map((result) => (
-                              <MarketCard key={result.id} result={result} />
+                        : rows.map((result, index) => (
+                              <ResultRow
+                                  key={result.id}
+                                  result={result}
+                                  index={index}
+                              />
                           ))}
 
-                    {!loading && rows.length === 0 && !error && (
-                        <p className="rounded-2xl bg-card px-4 py-8 text-center text-sm text-app-muted ring-1 ring-white/10">
-                            Is filter mein abhi koi market nahi mila.
+                    {!loading && rows.length === 0 && (
+                        <p className="px-4 py-10 text-center text-sm text-neutral-500">
+                            {search
+                                ? `“${search}” se koi market nahi mila.`
+                                : 'Abhi koi result nahi mila.'}
                         </p>
                     )}
                 </div>
+
+                {!loading && data?.counts && (
+                    <p className="mt-3 text-center text-xs text-app-muted">
+                        Showing {rows.length} · India {data.counts.india} ·
+                        Declared {data.counts.declared}
+                    </p>
+                )}
             </div>
         </AuthenticatedLayout>
     );
