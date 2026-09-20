@@ -4,21 +4,19 @@ import { Head } from '@inertiajs/react';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-function chartUrl() {
-    return 'https://sattamatkaapi.live/live-results';
+function chartUrl(result) {
+    return result?.chart_url || 'https://satta-king-fast.com/';
 }
 
 function ResultRow({ result, index, yesterdayLabel, todayLabel }) {
     const highlight = Boolean(
-        result.is_india ||
-            (result.today_result && result.today_result !== 'XX') ||
-            (result.last_result && result.last_result !== 'XX'),
+        result.is_featured ||
+            result.highlight ||
+            (result.today_result && result.today_result !== 'XX'),
     );
     const timeLabel =
         result.close_time ||
         result.open_time ||
-        result.today?.close_time ||
-        result.yesterday?.close_time ||
         '—';
 
     const lastValue = result.last_result || 'XX';
@@ -45,7 +43,7 @@ function ResultRow({ result, index, yesterdayLabel, todayLabel }) {
                 <p className="mt-0.5 text-[11px] text-black/80 sm:text-xs">
                     at {timeLabel}{' '}
                     <a
-                        href={chartUrl()}
+                        href={chartUrl(result)}
                         target="_blank"
                         rel="noreferrer"
                         className="font-medium text-blue-600 underline"
@@ -134,7 +132,7 @@ export default function Result() {
                 <PageHeader
                     eyebrow="Live board"
                     title="Results"
-                    subtitle="Last result always visible · today shows XX until declared."
+                    subtitle="Live from satta-king-fast.com · search · numbered board."
                 />
 
                 {error && (

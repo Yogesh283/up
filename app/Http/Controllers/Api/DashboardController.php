@@ -3,14 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Services\SattaMatkaApi;
+use App\Services\SattaKingFastService;
 use App\Support\Draws;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
-    public function index(Request $request, SattaMatkaApi $api): JsonResponse
+    public function index(Request $request, SattaKingFastService $api): JsonResponse
     {
         $user = $request->user();
         $bets = $user->bets()->latest()->get();
@@ -25,7 +25,7 @@ class DashboardController extends Controller
             ->all();
 
         if ($recentResults === []) {
-            $recentResults = collect($resultsPayload['results'] ?? [])
+            $recentResults = collect($resultsPayload['featured_results'] ?? $resultsPayload['results'] ?? [])
                 ->take(8)
                 ->values()
                 ->all();

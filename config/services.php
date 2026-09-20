@@ -41,4 +41,8 @@ return [
         'verify' => env('SMA_VERIFY', 'sma-e8483846b9fbde11b3295259'),
     ],
 
+    'satta_king_fast' => [
+        'base_url' => env('SATTA_KING_FAST_URL', 'https://satta-king-fast.com'),
+    ],
+
 ];
