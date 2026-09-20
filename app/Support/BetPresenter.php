@@ -22,7 +22,7 @@ class BetPresenter
             ->map(fn ($n) => str_pad((string) $n, $digits, '0', STR_PAD_LEFT))
             ->all();
 
-        $multiplier = (float) ($typeMeta['multiplier'] ?? config('betting.king.multiplier', 9));
+        $multiplier = (float) ($typeMeta['multiplier'] ?? config('betting.king.multiplier', 90));
         $potential = round((float) $bet->amount * $multiplier, 2);
 
         $boardLabel = match ($bet->board) {
@@ -85,7 +85,7 @@ class BetPresenter
         return [
             'label' => 'Number',
             'hint' => '00–99',
-            'multiplier' => (float) config('betting.king.multiplier', 9),
+            'multiplier' => (float) config('betting.king.multiplier', 90),
         ];
     }
 

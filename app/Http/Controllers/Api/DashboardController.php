@@ -47,7 +47,7 @@ class DashboardController extends Controller
                 'king' => config('betting.king'),
                 'matka_types' => config('betting.matka.types'),
                 'ticket_price' => (float) config('betting.ticket_price', 1),
-                'prize_multiplier' => (float) config('betting.king.multiplier', 9),
+                'prize_multiplier' => (float) config('betting.king.multiplier', 90),
                 'pick_count' => 1,
                 'min_number' => 0,
                 'max_number' => 99,

@@ -13,14 +13,14 @@ return [
     'max_amount' => (float) env('BET_MAX_AMOUNT', 100000),
 
     /*
-    | Satta King: pick any 00–99, payout 1₹ → 9₹
+    | Satta King: pick any 00–99, payout 1₹ → 90₹
     */
     'king' => [
-        'multiplier' => (float) env('BET_KING_MULTIPLIER', 9),
+        'multiplier' => (float) env('BET_KING_MULTIPLIER', 90),
         'min_number' => 0,
         'max_number' => 99,
         'pick_count' => 1,
-        'label' => '1₹ = 9₹',
+        'label' => '1₹ = 90₹',
     ],
 
     /*
@@ -79,7 +79,7 @@ return [
 
     // Legacy aliases used by older code paths
     'ticket_price' => (float) env('BET_TICKET_PRICE', 1),
-    'prize_multiplier' => (float) env('BET_PRIZE_MULTIPLIER', env('BET_KING_MULTIPLIER', 9)),
+    'prize_multiplier' => (float) env('BET_PRIZE_MULTIPLIER', env('BET_KING_MULTIPLIER', 90)),
     'pick_count' => 1,
     'min_number' => 0,
     'max_number' => 99,

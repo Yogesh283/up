@@ -75,7 +75,7 @@ class BetSettlementTest extends TestCase
         return Draws::marketId('matka', 'kalyan');
     }
 
-    public function test_winning_king_bet_credits_nine_times(): void
+    public function test_winning_king_bet_credits_ninety_times(): void
     {
         $drawId = $this->seedKingBoard('XX');
         $user = User::factory()->create(['wallet_balance' => 100]);
@@ -94,8 +94,10 @@ class BetSettlementTest extends TestCase
         $stats = app(BetSettlementService::class)->settle();
 
         $this->assertSame(1, $stats['won']);
-        $this->assertEquals(180.0, (float) $user->fresh()->wallet_balance);
+        // 90 left + (10 × 90) = 990
+        $this->assertEquals(990.0, (float) $user->fresh()->wallet_balance);
         $this->assertSame('won', Bet::first()->status);
+        $this->assertEquals(900.0, (float) Bet::first()->prize);
     }
 
     public function test_matka_jodi_win_credits_ninety_times(): void

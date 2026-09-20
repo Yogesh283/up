@@ -289,6 +289,6 @@ class BetSettlementService
             return (float) ($cfg['multiplier'] ?? config('betting.prize_multiplier', 9));
         }
 
-        return (float) config('betting.king.multiplier', config('betting.prize_multiplier', 9));
+        return (float) config('betting.king.multiplier', config('betting.prize_multiplier', 90));
     }
 }

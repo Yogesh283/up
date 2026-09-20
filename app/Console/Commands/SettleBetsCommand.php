@@ -9,7 +9,7 @@ class SettleBetsCommand extends Command
 {
     protected $signature = 'bets:settle';
 
-    protected $description = 'Settle pending Satta King / Matka bets against live results (1₹ = 9₹)';
+    protected $description = 'Settle pending Satta King / Matka bets against live results (King 90×)';
 
     public function handle(BetSettlementService $settlement): int
     {

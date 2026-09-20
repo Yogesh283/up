@@ -87,7 +87,7 @@ class Draws
 
         $slug = (string) ($row['slug'] ?? strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?? '', '-')));
         $cfg = config('betting.king', []);
-        $multiplier = (float) ($cfg['multiplier'] ?? 9);
+        $multiplier = (float) ($cfg['multiplier'] ?? 90);
         $timeLabel = (string) ($row['close_time'] ?? $row['open_time'] ?? '—');
         $open = MarketSorter::isAwaitingResult($row, 'king');
         $drawAt = MarketSorter::parseDrawAt($row)?->toIso8601String()
