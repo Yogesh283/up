@@ -131,9 +131,7 @@ class SattaKingFastService
      */
     public function fetchBoard(): array
     {
-        $minuteKey = 'satta_king_fast.board.'.now('Asia/Kolkata')->format('Y-m-d-H-i');
-
-        return Cache::remember($minuteKey, 45, function () {
+        return Cache::remember('satta_king_fast.board.live', 15, function () {
             $parsed = $this->fetchAndParse();
 
             if (($parsed['rows'] ?? []) !== []) {

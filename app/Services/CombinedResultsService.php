@@ -85,6 +85,19 @@ class CombinedResultsService
                 'counts' => $matka['counts'] ?? [],
             ],
             'error' => $errors === [] ? null : implode(' | ', $errors),
+            'updated_at' => now('Asia/Kolkata')->toIso8601String(),
+            'fingerprint' => md5(json_encode([
+                collect($kingResults)->map(fn ($r) => [
+                    $r['name'] ?? '',
+                    $r['last_result'] ?? '',
+                    $r['today_result'] ?? '',
+                ])->all(),
+                collect($matkaResults)->map(fn ($r) => [
+                    $r['name'] ?? '',
+                    $r['full_result'] ?? '',
+                ])->all(),
+            ])),
+            'poll_seconds' => 15,
         ];
     }
 }

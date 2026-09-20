@@ -2,7 +2,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
 import { Head } from '@inertiajs/react';
 import axios from 'axios';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 function chartUrl(result, board) {
     if (result?.chart_url) return result.chart_url;
@@ -128,37 +128,100 @@ export default function Result() {
     const [error, setError] = useState(null);
     const [search, setSearch] = useState('');
     const [board, setBoard] = useState('king');
+    const [livePulse, setLivePulse] = useState(false);
+    const [lastUpdated, setLastUpdated] = useState(null);
+    const fingerprintRef = useRef(null);
+    const pollSecondsRef = useRef(15);
 
-    const load = useCallback(() => {
+    const load = useCallback((opts = {}) => {
+        const silent = Boolean(opts.silent);
         const url =
             typeof route === 'function'
                 ? route('api.results')
                 : '/api/results';
 
+        if (!silent) {
+            setLoading(true);
+        }
+
         return axios
-            .get(url)
+            .get(url, {
+                params: { _ts: Date.now() },
+                headers: { 'Cache-Control': 'no-cache' },
+            })
             .then((response) => {
-                setData(response.data);
+                const next = response.data;
+                const prevFp = fingerprintRef.current;
+                const nextFp = next?.fingerprint || null;
+
+                if (typeof next?.poll_seconds === 'number' && next.poll_seconds > 0) {
+                    pollSecondsRef.current = next.poll_seconds;
+                }
+
+                if (prevFp && nextFp && prevFp !== nextFp) {
+                    setLivePulse(true);
+                    window.setTimeout(() => setLivePulse(false), 2500);
+                }
+
+                fingerprintRef.current = nextFp;
+                setData(next);
+                setLastUpdated(next?.updated_at || new Date().toISOString());
                 setError(
-                    response.data?.error
-                        ? `API warning: ${response.data.error}`
-                        : null,
+                    next?.error ? `API warning: ${next.error}` : null,
                 );
             })
             .catch((err) => {
-                setError(
-                    err.response?.data?.message ||
-                        'Could not load live results. Please try again.',
-                );
+                if (!silent) {
+                    setError(
+                        err.response?.data?.message ||
+                            'Could not load live results. Please try again.',
+                    );
+                }
             })
-            .finally(() => setLoading(false));
+            .finally(() => {
+                if (!silent) {
+                    setLoading(false);
+                }
+            });
     }, []);
 
     useEffect(() => {
-        setLoading(true);
-        load();
-        const timer = setInterval(load, 30000);
-        return () => clearInterval(timer);
+        load({ silent: false });
+
+        let timer = null;
+
+        const startPoll = () => {
+            if (timer) return;
+            timer = window.setInterval(() => {
+                if (document.visibilityState === 'visible') {
+                    load({ silent: true });
+                }
+            }, (pollSecondsRef.current || 15) * 1000);
+        };
+
+        const stopPoll = () => {
+            if (timer) {
+                window.clearInterval(timer);
+                timer = null;
+            }
+        };
+
+        const onVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                load({ silent: true });
+                startPoll();
+            } else {
+                stopPoll();
+            }
+        };
+
+        startPoll();
+        document.addEventListener('visibilitychange', onVisibility);
+
+        return () => {
+            stopPoll();
+            document.removeEventListener('visibilitychange', onVisibility);
+        };
     }, [load]);
 
     const rows = useMemo(() => {
@@ -185,6 +248,19 @@ export default function Result() {
             ? data?.matka_banner_text || data?.matka?.banner_text
             : data?.banner_text;
 
+    const updatedLabel = useMemo(() => {
+        if (!lastUpdated) return null;
+        try {
+            return new Date(lastUpdated).toLocaleTimeString(undefined, {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+            });
+        } catch {
+            return null;
+        }
+    }, [lastUpdated]);
+
     return (
         <AuthenticatedLayout>
             <Head title="Results" />
@@ -193,8 +269,28 @@ export default function Result() {
                 <PageHeader
                     eyebrow="Live boards"
                     title="Results"
-                    subtitle="Satta King Fast + Kalyan Matka — dono sources."
+                    subtitle="Auto refresh every 15s — naya result aate hi update."
                 />
+
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-success/15 px-3 py-1 text-xs font-semibold text-success ring-1 ring-success/30">
+                        <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-success" />
+                        </span>
+                        LIVE · auto update
+                    </span>
+                    {updatedLabel && (
+                        <span className="text-xs text-app-muted">
+                            Last check {updatedLabel}
+                        </span>
+                    )}
+                    {livePulse && (
+                        <span className="rounded-full bg-gold px-3 py-1 text-xs font-semibold text-navy-dark">
+                            New result updated
+                        </span>
+                    )}
+                </div>
 
                 {error && (
                     <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -289,10 +385,7 @@ export default function Result() {
                     </label>
                     <button
                         type="button"
-                        onClick={() => {
-                            setLoading(true);
-                            load();
-                        }}
+                        onClick={() => load({ silent: false })}
                         className="rounded-xl bg-gold px-4 py-3 text-sm font-semibold text-navy-dark"
                     >
                         Refresh
@@ -368,7 +461,8 @@ export default function Result() {
                 {!loading && data?.counts && (
                     <p className="mt-3 text-center text-xs text-app-muted">
                         King {data.counts.king || 0} · Matka{' '}
-                        {data.counts.matka || 0} · Showing {rows.length}
+                        {data.counts.matka || 0} · Showing {rows.length} ·
+                        Auto refresh 15s
                     </p>
                 )}
             </div>

@@ -55,9 +55,7 @@ class SattaKalyanMatkaService
      */
     public function fetchBoard(): array
     {
-        $key = 'satta_kalyan_matka.board.'.now('Asia/Kolkata')->format('Y-m-d-H-i');
-
-        return Cache::remember($key, 45, function () {
+        return Cache::remember('satta_kalyan_matka.board.live', 15, function () {
             $parsed = $this->fetchAndParse();
 
             if (($parsed['rows'] ?? []) !== []) {
