@@ -17,20 +17,20 @@ class BetController extends Controller
     {
         $minNumber = (int) config('betting.min_number', 0);
         $maxNumber = (int) config('betting.max_number', 99);
-        $defaultAmount = (float) config('betting.ticket_price', 10);
-        $minAmount = (float) config('betting.min_amount', $defaultAmount);
-        $maxAmount = (float) config('betting.max_amount', 10000);
+        $minAmount = (float) config('betting.min_amount', 1);
+        $maxAmount = (float) config('betting.max_amount', 100000);
         $pickCount = (int) config('betting.pick_count', 1);
+        $multiplier = (float) config('betting.prize_multiplier', 9);
 
         $validated = $request->validate([
             'draw_id' => 'required|integer',
             'numbers' => 'required|array',
             'numbers.*' => "integer|min:{$minNumber}|max:{$maxNumber}",
-            'amount' => "nullable|numeric|min:{$minAmount}|max:{$maxAmount}",
+            'amount' => "required|numeric|min:{$minAmount}|max:{$maxAmount}",
             'board' => 'nullable|in:king,matka',
         ]);
 
-        $payload = $results->toResultsPayload();
+        $payload = $results->toResultsPayload(settleBets: false);
         $draw = Draws::find((int) $validated['draw_id'], $payload);
 
         if (! $draw) {
@@ -74,10 +74,7 @@ class BetController extends Controller
             }
         }
 
-        $amount = isset($validated['amount'])
-            ? (float) $validated['amount']
-            : (float) $draw['ticket_price'];
-
+        $amount = round((float) $validated['amount'], 2);
         $user = $request->user();
 
         if ((float) $user->wallet_balance < $amount) {
@@ -102,6 +99,8 @@ class BetController extends Controller
                 'user_id' => $lockedUser->id,
                 'draw_id' => $draw['id'],
                 'draw_name' => $draw['display_name'] ?? $draw['name'],
+                'board' => $draw['board'],
+                'market_slug' => $draw['market_slug'] ?? null,
                 'numbers' => $numbers,
                 'amount' => $amount,
                 'status' => 'pending',
@@ -117,12 +116,13 @@ class BetController extends Controller
             'bet' => [
                 'id' => $bet->id,
                 'draw_name' => $bet->draw_name,
-                'board' => $draw['board'],
+                'board' => $bet->board,
                 'numbers' => $bet->numbers,
                 'numbers_display' => collect($bet->numbers)
                     ->map(fn ($n) => str_pad((string) $n, 2, '0', STR_PAD_LEFT))
                     ->all(),
                 'amount' => (float) $bet->amount,
+                'potential_win' => round((float) $bet->amount * $multiplier, 2),
                 'status' => $bet->status,
                 'draw_at' => optional($bet->draw_at)?->toIso8601String(),
                 'created_at' => $bet->created_at?->toIso8601String(),

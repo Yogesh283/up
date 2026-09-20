@@ -87,7 +87,7 @@ export default function Dashboard() {
     const defaultTicket = betting.ticket_price ?? 10;
     const minAmount = betting.min_amount ?? defaultTicket;
     const maxAmount = betting.max_amount ?? 10000;
-    const prizeMultiplier = betting.prize_multiplier ?? 90;
+    const prizeMultiplier = betting.prize_multiplier ?? 9;
 
     const boardDraws = useMemo(() => {
         const list = (data?.upcoming_draws || []).filter((d) => d.board === board);
@@ -229,8 +229,8 @@ export default function Dashboard() {
                         Hi, {auth.user?.name?.split(' ')[0] || 'Player'}
                     </h1>
                     <p className="mt-1 text-sm text-app-muted">
-                        Satta King ya Kalyan Matka — kisi bhi market pe number
-                        select karke bet lagao.
+                        Kisi bhi number pe jitni marzi amount — jeet pe 1₹ = 9₹
+                        wallet me.
                     </p>
                 </div>
 
@@ -279,7 +279,7 @@ export default function Dashboard() {
                             </p>
                         </div>
                         <p className="text-sm text-app-text">
-                            Win ×{prizeMultiplier}:{' '}
+                            Win rate 1₹ → ₹{prizeMultiplier}:{' '}
                             <span className="font-semibold text-gold">
                                 {potentialWin
                                     ? formatMoney(potentialWin)
@@ -517,6 +517,23 @@ export default function Dashboard() {
                                                         bet.created_at,
                                                     )}{' '}
                                                     · {formatMoney(bet.amount)}
+                                                    {bet.status === 'won' &&
+                                                        bet.prize > 0 && (
+                                                            <>
+                                                                {' '}
+                                                                · Won{' '}
+                                                                {formatMoney(
+                                                                    bet.prize,
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    {bet.result_value && (
+                                                        <>
+                                                            {' '}
+                                                            · Result{' '}
+                                                            {bet.result_value}
+                                                        </>
+                                                    )}
                                                 </p>
                                             </div>
                                             <StatusBadge status={bet.status} />

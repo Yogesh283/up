@@ -47,13 +47,12 @@ class Draws
      */
     public static function fromPayload(array $payload, bool $onlyOpen = true): array
     {
-        $ticket = (float) config('betting.ticket_price', 10);
-        $multiplier = (float) config('betting.prize_multiplier', 90);
+        $ticket = (float) config('betting.ticket_price', 1);
+        $multiplier = (float) config('betting.prize_multiplier', 9);
         $pickCount = (int) config('betting.pick_count', 1);
         $minNumber = (int) config('betting.min_number', 0);
         $maxNumber = (int) config('betting.max_number', 99);
-        $prizeAmount = $ticket * $multiplier;
-        $prizeDisplay = '₹'.number_format($prizeAmount, 0);
+        $prizeDisplay = '1₹ = ₹'.number_format($multiplier, 0);
 
         $draws = [];
 

@@ -101,6 +101,7 @@ class BetPlacementTest extends TestCase
         $response = $this->actingAs($user)->postJson('/api/bets', [
             'draw_id' => $drawId,
             'numbers' => [1, 2, 3],
+            'amount' => 10,
         ]);
 
         $response->assertStatus(422);

@@ -14,7 +14,7 @@ class CombinedResultsService
      *
      * @return array<string, mixed>
      */
-    public function toResultsPayload(): array
+    public function toResultsPayload(bool $settleBets = true): array
     {
         $king = $this->king->toResultsPayload();
         $matka = $this->matka->toResultsPayload();
@@ -42,7 +42,7 @@ class CombinedResultsService
         $latestKing = $king['latest'] ?? null;
         $latestMatka = $matka['latest'] ?? null;
 
-        return [
+        $payload = [
             'latest' => $latestKing,
             'latest_matka' => $latestMatka,
             'results' => $kingResults,
@@ -99,5 +99,15 @@ class CombinedResultsService
             ])),
             'poll_seconds' => 15,
         ];
+
+        if ($settleBets) {
+            try {
+                app(BetSettlementService::class)->settleFromPayload($payload);
+            } catch (\Throwable) {
+                // Settlement must never break results API.
+            }
+        }
+
+        return $payload;
     }
 }

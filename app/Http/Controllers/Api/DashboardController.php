@@ -35,8 +35,8 @@ class DashboardController extends Controller
                 ->all();
         }
 
-        $ticket = (float) config('betting.ticket_price', 10);
-        $multiplier = (float) config('betting.prize_multiplier', 90);
+        $ticket = (float) config('betting.ticket_price', 1);
+        $multiplier = (float) config('betting.prize_multiplier', 9);
 
         return response()->json([
             'user' => [
@@ -104,11 +104,14 @@ class DashboardController extends Controller
             'my_bets' => $bets->take(5)->map(fn ($bet) => [
                 'id' => $bet->id,
                 'draw_name' => $bet->draw_name,
+                'board' => $bet->board,
                 'numbers' => $bet->numbers,
                 'numbers_display' => collect($bet->numbers ?? [])
                     ->map(fn ($n) => str_pad((string) $n, 2, '0', STR_PAD_LEFT))
                     ->all(),
                 'amount' => (float) $bet->amount,
+                'prize' => (float) $bet->prize,
+                'result_value' => $bet->result_value,
                 'status' => $bet->status,
                 'draw_at' => optional($bet->draw_at)?->toIso8601String(),
                 'created_at' => $bet->created_at?->toIso8601String(),
