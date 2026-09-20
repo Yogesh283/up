@@ -43,6 +43,7 @@ return [
 
     'satta_king_fast' => [
         'base_url' => env('SATTA_KING_FAST_URL', 'https://satta-king-fast.com'),
+        'proxy_url' => env('SATTA_KING_FAST_PROXY', 'https://r.jina.ai'),
     ],
 
 ];

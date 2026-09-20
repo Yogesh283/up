@@ -131,43 +131,187 @@ class SattaKingFastService
      */
     public function fetchBoard(): array
     {
-        $cacheKey = 'satta_king_fast.board.'.now('Asia/Kolkata')->format('Y-m-d-H-i');
+        $minuteKey = 'satta_king_fast.board.'.now('Asia/Kolkata')->format('Y-m-d-H-i');
 
-        return Cache::remember($cacheKey, 45, function () {
-            $base = rtrim((string) config('services.satta_king_fast.base_url', 'https://satta-king-fast.com'), '/');
+        return Cache::remember($minuteKey, 45, function () {
+            $parsed = $this->fetchAndParse();
 
+            if (($parsed['rows'] ?? []) !== []) {
+                Cache::put('satta_king_fast.board.last_ok', $parsed, now()->addHours(6));
+
+                return $parsed;
+            }
+
+            $cached = Cache::get('satta_king_fast.board.last_ok');
+            if (is_array($cached) && ($cached['rows'] ?? []) !== []) {
+                $cached['error'] = ($parsed['error'] ?? 'Fetch failed').' · showing last cached board';
+
+                return $cached;
+            }
+
+            return $parsed;
+        });
+    }
+
+    /**
+     * @return array{rows: list<array<string, mixed>>, today_date: ?string, yesterday_date: ?string, error: ?string}
+     */
+    protected function fetchAndParse(): array
+    {
+        $base = rtrim((string) config('services.satta_king_fast.base_url', 'https://satta-king-fast.com'), '/');
+        $empty = [
+            'rows' => [],
+            'today_date' => now('Asia/Kolkata')->toDateString(),
+            'yesterday_date' => now('Asia/Kolkata')->subDay()->toDateString(),
+            'error' => null,
+        ];
+
+        // 1) Direct HTML (works when Cloudflare is not blocking the server IP)
+        $direct = $this->httpGet($base.'/', [
+            'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept' => 'text/html,application/xhtml+xml',
+            'Accept-Language' => 'en-US,en;q=0.9',
+            'Referer' => $base.'/',
+        ]);
+
+        if ($direct['ok'] && ! $this->isCloudflareChallenge($direct['body'])) {
+            $parsed = $this->parseHtml($direct['body']);
+            if ($parsed['rows'] !== []) {
+                return $parsed;
+            }
+        }
+
+        // 2) Reader proxy (bypasses Cloudflare JS challenge; returns markdown)
+        $proxyBase = rtrim((string) config('services.satta_king_fast.proxy_url', 'https://r.jina.ai'), '/');
+        $proxy = $this->httpGet($proxyBase.'/https://satta-king-fast.com/', [
+            'User-Agent' => 'Mozilla/5.0',
+            'Accept' => 'text/plain,text/markdown,*/*',
+        ], 40);
+
+        if ($proxy['ok']) {
+            $parsed = $this->parseMarkdown($proxy['body']);
+            if ($parsed['rows'] !== []) {
+                return $parsed;
+            }
+
+            // Sometimes proxy still embeds enough HTML-ish content
+            $parsedHtml = $this->parseHtml($proxy['body']);
+            if ($parsedHtml['rows'] !== []) {
+                return $parsedHtml;
+            }
+        }
+
+        $status = $direct['status'] ?? $proxy['status'] ?? 0;
+        $empty['error'] = $this->isCloudflareChallenge($direct['body'] ?? '')
+            ? 'Cloudflare blocked direct fetch (HTTP '.($direct['status'] ?? 403).'); proxy also failed'
+            : 'Unable to load satta-king-fast.com (HTTP '.$status.')';
+
+        return $empty;
+    }
+
+    /**
+     * @param  array<string, string>  $headers
+     * @return array{ok:bool,status:int,body:string}
+     */
+    protected function httpGet(string $url, array $headers = [], int $timeout = 20): array
+    {
+        try {
+            $response = Http::timeout($timeout)
+                ->withHeaders($headers)
+                ->get($url);
+
+            return [
+                'ok' => $response->successful(),
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('SattaKingFast HTTP error', [
+                'url' => $url,
+                'message' => $e->getMessage(),
+            ]);
+
+            return [
+                'ok' => false,
+                'status' => 0,
+                'body' => $e->getMessage(),
+            ];
+        }
+    }
+
+    protected function isCloudflareChallenge(string $body): bool
+    {
+        return str_contains($body, 'Just a moment...')
+            || str_contains($body, 'cf-browser-verification')
+            || str_contains($body, 'cf-challenge')
+            || str_contains($body, 'Attention Required! | Cloudflare');
+    }
+
+    /**
+     * Parse jina.ai / markdown mirror of the results table.
+     *
+     * @return array{rows: list<array<string, mixed>>, today_date: ?string, yesterday_date: ?string, error: ?string}
+     */
+    protected function parseMarkdown(string $markdown): array
+    {
+        $today = now('Asia/Kolkata')->toDateString();
+        $yesterday = now('Asia/Kolkata')->subDay()->toDateString();
+
+        if (preg_match('/Satta King (?:Fast )?Results? of ([A-Za-z]+ \d{1,2}, \d{4})/i', $markdown, $m)
+            || preg_match('/Satta King Result of (\d{1,2})\w{0,2} ([A-Za-z]+) (\d{4})/i', $markdown, $m2)) {
             try {
-                $response = Http::timeout(20)
-                    ->retry(2, 300)
-                    ->withHeaders([
-                        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept' => 'text/html,application/xhtml+xml',
-                    ])
-                    ->get($base.'/');
+                if (isset($m[1])) {
+                    $parsed = Carbon::parse($m[1], 'Asia/Kolkata');
+                } else {
+                    $parsed = Carbon::parse($m2[1].' '.$m2[2].' '.$m2[3], 'Asia/Kolkata');
+                }
+                $today = $parsed->toDateString();
+                $yesterday = $parsed->copy()->subDay()->toDateString();
+            } catch (\Throwable) {
+                // keep defaults
+            }
+        }
 
-                if (! $response->successful()) {
-                    Log::warning('SattaKingFast fetch failed', ['status' => $response->status()]);
+        $rows = [];
+        // Example line:
+        // | ### DESAWAR ### at 05:00 AM ### [Record Chart](https://...) | ### 35 | ### 32 |
+        $pattern = '/\|\s*###\s*([^#|]+?)\s*###\s*at\s*([^#|]+?)\s*###\s*\[Record Chart\]\(([^)]+)\)\s*\|\s*###\s*([^#|]+?)\s*\|\s*###\s*([^#|]+?)\s*\|/iu';
 
-                    return [
-                        'rows' => [],
-                        'today_date' => now('Asia/Kolkata')->toDateString(),
-                        'yesterday_date' => now('Asia/Kolkata')->subDay()->toDateString(),
-                        'error' => 'Satta King Fast HTTP '.$response->status(),
-                    ];
+        if (preg_match_all($pattern, $markdown, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $name = trim(html_entity_decode($match[1], ENT_QUOTES | ENT_HTML5));
+                $time = trim($match[2]);
+                $chart = trim($match[3]);
+                $last = $this->normalizeResult(trim($match[4]));
+                $todayVal = $this->normalizeResult(trim($match[5]));
+
+                if ($name === '' || str_contains(mb_strtoupper($name), 'SHOW YOUR GAME')) {
+                    continue;
                 }
 
-                return $this->parseHtml($response->body());
-            } catch (\Throwable $e) {
-                Log::warning('SattaKingFast exception', ['message' => $e->getMessage()]);
+                $code = strtoupper(substr(preg_replace('/\W+/', '', $name) ?: 'X', 0, 4));
+                if (preg_match('#/([a-z0-9-]+)/?$#i', $chart, $cm)) {
+                    $code = strtoupper($cm[1]);
+                }
 
-                return [
-                    'rows' => [],
-                    'today_date' => now('Asia/Kolkata')->toDateString(),
-                    'yesterday_date' => now('Asia/Kolkata')->subDay()->toDateString(),
-                    'error' => $e->getMessage(),
+                $rows[] = [
+                    'code' => $code,
+                    'name' => $name,
+                    'time' => $time !== '' ? $time : '—',
+                    'chart_url' => $chart !== '' ? $chart : 'https://satta-king-fast.com/',
+                    'yesterday' => $last,
+                    'today' => $todayVal,
+                    'highlight' => in_array(strtoupper($name), $this->featuredNames, true),
                 ];
             }
-        });
+        }
+
+        return [
+            'rows' => $rows,
+            'today_date' => $today,
+            'yesterday_date' => $yesterday,
+            'error' => $rows === [] ? 'No markets parsed from satta-king-fast mirror' : null,
+        ];
     }
 
     /**
