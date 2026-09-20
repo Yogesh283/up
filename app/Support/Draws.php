@@ -75,6 +75,44 @@ class Draws
     }
 
     /**
+     * Betting allowed only until N minutes before result time.
+     */
+    public static function isWithinBettingWindow(?string $drawAtIso): bool
+    {
+        if (! $drawAtIso) {
+            return true;
+        }
+
+        try {
+            $drawAt = Carbon::parse($drawAtIso, 'Asia/Kolkata');
+        } catch (\Throwable) {
+            return true;
+        }
+
+        $minutes = max(0, (int) config('betting.close_minutes_before', 40));
+        $cutoff = $drawAt->copy()->subMinutes($minutes);
+
+        return Carbon::now('Asia/Kolkata')->lt($cutoff);
+    }
+
+    public static function bettingClosesAt(?string $drawAtIso): ?string
+    {
+        if (! $drawAtIso) {
+            return null;
+        }
+
+        try {
+            $drawAt = Carbon::parse($drawAtIso, 'Asia/Kolkata');
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $minutes = max(0, (int) config('betting.close_minutes_before', 40));
+
+        return $drawAt->copy()->subMinutes($minutes)->toIso8601String();
+    }
+
+    /**
      * @param  array<string, mixed>  $row
      * @return array<string, mixed>|null
      */
@@ -89,9 +127,12 @@ class Draws
         $cfg = config('betting.king', []);
         $multiplier = (float) ($cfg['multiplier'] ?? 90);
         $timeLabel = (string) ($row['close_time'] ?? $row['open_time'] ?? '—');
-        $open = MarketSorter::isAwaitingResult($row, 'king');
+        $awaiting = MarketSorter::isAwaitingResult($row, 'king');
         $drawAt = MarketSorter::parseDrawAt($row)?->toIso8601String()
             ?? self::estimateDrawAt($timeLabel);
+        $windowOpen = self::isWithinBettingWindow($drawAt);
+        $open = $awaiting && $windowOpen;
+        $closesAt = self::bettingClosesAt($drawAt);
 
         return [
             'id' => self::marketId('king', $slug ?: 'market'),
@@ -101,6 +142,7 @@ class Draws
             'name' => $name,
             'display_name' => $name.' · Satta King',
             'draw_at' => $drawAt,
+            'betting_closes_at' => $closesAt,
             'time_label' => $timeLabel,
             'prize' => '1₹ = ₹'.number_format($multiplier, 0),
             'ticket_price' => 1,
@@ -123,6 +165,9 @@ class Draws
                 ],
             ],
             'status' => $open ? 'open' : 'closed',
+            'close_reason' => $open
+                ? null
+                : (! $awaiting ? 'result_declared' : 'cutoff'),
             'current_result' => (string) ($row['today_result'] ?? 'XX'),
             'urgency_bucket' => $row['urgency_bucket'] ?? null,
             'is_due' => (bool) ($row['is_due'] ?? false),
@@ -145,11 +190,13 @@ class Draws
         $timeLabel = (string) ($row['close_time'] ?? $row['open_time'] ?? '—');
         $drawAt = MarketSorter::parseDrawAt($row)?->toIso8601String()
             ?? self::estimateDrawAt($timeLabel);
+        $windowOpen = self::isWithinBettingWindow($drawAt);
+        $closesAt = self::bettingClosesAt($drawAt);
         $availability = $row['betting'] ?? [];
 
         $betTypes = [];
         foreach (config('betting.matka.types', []) as $id => $cfg) {
-            $isOpen = (bool) ($availability[$id] ?? false);
+            $isOpen = (bool) ($availability[$id] ?? false) && $windowOpen;
             $betTypes[] = [
                 'id' => $id,
                 'label' => $cfg['label'],
@@ -165,6 +212,7 @@ class Draws
 
         $anyOpen = collect($betTypes)->contains(fn ($t) => $t['open']);
         $default = collect($betTypes)->firstWhere('open', true) ?? ($betTypes[0] ?? null);
+        $resultStillPending = MarketSorter::isAwaitingResult($row, 'matka');
 
         return [
             'id' => self::marketId('matka', $slug ?: 'market'),
@@ -174,6 +222,7 @@ class Draws
             'name' => $name,
             'display_name' => $name.' · Kalyan Matka',
             'draw_at' => $drawAt,
+            'betting_closes_at' => $closesAt,
             'time_label' => $timeLabel,
             'prize' => 'Single 9× · Jodi 90× · Patti 900×',
             'ticket_price' => 1,
@@ -185,6 +234,9 @@ class Draws
             'bet_type' => $default['id'] ?? 'jodi',
             'bet_types' => $betTypes,
             'status' => $anyOpen ? 'open' : 'closed',
+            'close_reason' => $anyOpen
+                ? null
+                : (! $resultStillPending ? 'result_declared' : (! $windowOpen ? 'cutoff' : 'session_closed')),
             'current_result' => (string) ($row['full_result'] ?? $row['jodi'] ?? 'XX'),
             'urgency_bucket' => $row['urgency_bucket'] ?? null,
             'is_due' => (bool) ($row['is_due'] ?? false),

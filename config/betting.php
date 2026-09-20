@@ -12,6 +12,9 @@ return [
 
     'max_amount' => (float) env('BET_MAX_AMOUNT', 100000),
 
+    // Result time se itne minute pehle betting band
+    'close_minutes_before' => (int) env('BET_CLOSE_MINUTES_BEFORE', 40),
+
     /*
     | Satta King: pick any 00–99, payout 1₹ → 90₹
     */

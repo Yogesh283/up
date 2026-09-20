@@ -54,8 +54,13 @@ class BetController extends Controller
         }
 
         if (! ($typeCfg['open'] ?? false) || ($draw['status'] ?? null) !== 'open') {
+            $minutes = (int) config('betting.close_minutes_before', 40);
+            $msg = ($draw['close_reason'] ?? null) === 'cutoff'
+                ? "Betting band — result se {$minutes} minute pehle cutoff."
+                : 'Betting is closed for this type / market.';
+
             throw ValidationException::withMessages([
-                'bet_type' => 'Betting is closed for this type / market.',
+                'bet_type' => $msg,
             ]);
         }
 

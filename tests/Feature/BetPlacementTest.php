@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Support\Draws;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
@@ -11,6 +12,19 @@ use Tests\TestCase;
 class BetPlacementTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        // Before DESAWAR 05:00 AM so 40-min cutoff window is still open
+        Carbon::setTestNow(Carbon::parse('2026-09-20 03:00:00', 'Asia/Kolkata'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
 
     protected function seedLiveBoards(): int
     {
@@ -93,6 +107,26 @@ class BetPlacementTest extends TestCase
 
         $response->assertCreated();
         $this->assertEquals(80.0, (float) $user->fresh()->wallet_balance);
+    }
+
+    public function test_betting_closes_forty_minutes_before_result(): void
+    {
+        $this->seedLiveBoards();
+        // DESAWAR 05:00 → cutoff 04:20; freeze at 04:30
+        Carbon::setTestNow(Carbon::parse('2026-09-20 04:30:00', 'Asia/Kolkata'));
+
+        $drawId = Draws::marketId('king', 'desawar');
+        $user = User::factory()->create(['wallet_balance' => 100]);
+
+        $response = $this->actingAs($user)->postJson('/api/bets', [
+            'draw_id' => $drawId,
+            'board' => 'king',
+            'bet_type' => 'number',
+            'numbers' => [12],
+            'amount' => 10,
+        ]);
+
+        $response->assertStatus(422);
     }
 
     public function test_bet_requires_exact_number_count(): void

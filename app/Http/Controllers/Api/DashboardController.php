@@ -44,6 +44,7 @@ class DashboardController extends Controller
             'betting' => [
                 'min_amount' => (float) config('betting.min_amount', 1),
                 'max_amount' => (float) config('betting.max_amount', 100000),
+                'close_minutes_before' => (int) config('betting.close_minutes_before', 40),
                 'king' => config('betting.king'),
                 'matka_types' => config('betting.matka.types'),
                 'ticket_price' => (float) config('betting.ticket_price', 1),
@@ -104,6 +105,8 @@ class DashboardController extends Controller
                 'current_result' => $draw['current_result'],
                 'is_due' => $draw['is_due'] ?? false,
                 'is_next_up' => $draw['is_next_up'] ?? false,
+                'betting_closes_at' => $draw['betting_closes_at'] ?? null,
+                'close_reason' => $draw['close_reason'] ?? null,
             ])->values(),
             'active_bets' => $pending->map(fn ($bet) => BetPresenter::toArray($bet))->values(),
             'recent_bets' => $settled->take(10)->map(fn ($bet) => BetPresenter::toArray($bet))->values(),

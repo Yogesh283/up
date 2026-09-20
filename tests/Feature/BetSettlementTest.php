@@ -6,6 +6,7 @@ use App\Models\Bet;
 use App\Models\User;
 use App\Services\BetSettlementService;
 use App\Support\Draws;
+use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Tests\TestCase;
@@ -13,6 +14,18 @@ use Tests\TestCase;
 class BetSettlementTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        Carbon::setTestNow(Carbon::parse('2026-09-20 03:00:00', 'Asia/Kolkata'));
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
+    }
 
     protected function seedKingBoard(string $todayResult = 'XX'): int
     {

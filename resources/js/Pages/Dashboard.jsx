@@ -290,7 +290,8 @@ export default function Dashboard() {
                         Hi, {auth.user?.name?.split(' ')[0] || 'Player'}
                     </h1>
                     <p className="mt-1 text-sm text-app-muted">
-                        Number → amount → Add bet → last me Confirm (popup).
+                        Number → amount → Add bet → Confirm. Betting result se 40
+                        min pehle band.
                     </p>
                 </div>
 
@@ -400,6 +401,9 @@ export default function Dashboard() {
                                         <p className="mt-0.5 text-xs text-app-muted">
                                             {draw.time_label || formatDrawTime(draw.draw_at)} ·{' '}
                                             {draw.prize}
+                                            {draw.betting_closes_at
+                                                ? ` · Bet till ${formatDrawTime(draw.betting_closes_at)}`
+                                                : ''}
                                         </p>
                                     </div>
                                     <span
@@ -409,7 +413,11 @@ export default function Dashboard() {
                                                 : 'bg-success/20 text-success'
                                         }`}
                                     >
-                                        {closed ? draw.current_result || 'Closed' : 'Open'}
+                                        {closed
+                                            ? draw.close_reason === 'cutoff'
+                                                ? 'Cutoff'
+                                                : draw.current_result || 'Closed'
+                                            : 'Open'}
                                     </span>
                                 </button>
                             );
