@@ -226,7 +226,7 @@ class SattaKalyanMatkaService
         $name = (string) $row['name'];
         $raw = strtoupper(trim((string) ($row['result'] ?? '')));
         $isHoliday = $raw === 'HOLIDAY' || $raw === '';
-        $parts = $isHoliday ? [] : preg_split('/-/', $raw) ?: [];
+        $parts = $isHoliday ? [] : (preg_split('/-/', $raw) ?: []);
         $open = $parts[0] ?? null;
         $jodi = $parts[1] ?? null;
         $close = $parts[2] ?? null;
