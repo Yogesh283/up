@@ -4,80 +4,34 @@ import { Head } from '@inertiajs/react';
 import axios from 'axios';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-function formatDay(date) {
-    if (!date) return '';
-    try {
-        return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
-            weekday: 'short',
-            day: 'numeric',
-            month: 'short',
-            year: 'numeric',
-        });
-    } catch {
-        return date;
-    }
+function chartUrl() {
+    return 'https://sattamatkaapi.live/live-results';
 }
 
-function pad2(value) {
-    const digits = String(value ?? '').replace(/\D/g, '');
-    if (!digits) return null;
-    if (digits.length === 1) return digits.padStart(2, '0');
-    return digits.slice(0, 2);
-}
+function ResultRow({ result, index, yesterdayLabel, todayLabel }) {
+    const highlight = Boolean(
+        result.is_india ||
+            (result.today_result && result.today_result !== 'XX') ||
+            (result.last_result && result.last_result !== 'XX'),
+    );
+    const timeLabel =
+        result.close_time ||
+        result.open_time ||
+        result.today?.close_time ||
+        result.yesterday?.close_time ||
+        '—';
 
-/** Screenshot-style left / right numbers (XX if pending). */
-function rowNumbers(result) {
-    let left = pad2(result.open_ank);
-    let right = pad2(result.close_ank);
-
-    const raw = String(result.result_string || result.full_result || '');
-    const parts = raw
-        .split(/[-–]/)
-        .map((p) => p.trim())
-        .filter(Boolean);
-
-    if (parts.length >= 1 && !left) {
-        const openPart = parts[0].replace(/\*/g, '');
-        left = pad2(openPart) || pad2(result.open_pana);
-    }
-
-    if (parts.length >= 3 && !right) {
-        const closePart = parts[2].replace(/\*/g, '');
-        if (closePart && !parts[2].includes('*')) {
-            right = pad2(closePart) || pad2(result.close_pana);
-        }
-    } else if (parts.length === 2 && !right) {
-        const second = parts[1].replace(/\*/g, '');
-        if (second && !parts[1].includes('*') && second.length >= 2) {
-            right = pad2(second);
-        }
-    }
-
-    const jodi = String(result.jodi || '');
-    if (!left && /^\d{2}$/.test(jodi)) {
-        left = jodi;
-    }
-
-    return {
-        left: left || 'XX',
-        right: right || 'XX',
-    };
-}
-
-function chartUrl(result) {
-    if (!result?.slug) return 'https://sattamatkaapi.live/live-results';
-    return `https://sattamatkaapi.live/live-results`;
-}
-
-function ResultRow({ result, index }) {
-    const { left, right } = rowNumbers(result);
-    const highlight = Boolean(result.is_india || result.has_result);
-    const timeLabel = result.close_time || result.open_time || '—';
+    const lastValue = result.last_result || 'XX';
+    const todayValue = result.today_result || 'XX';
 
     return (
         <div
             className={`flex items-center gap-2 border-b border-black/10 px-3 py-3 sm:gap-3 sm:px-4 ${
-                highlight ? 'bg-[#ffe566]' : index % 2 === 0 ? 'bg-white' : 'bg-neutral-100'
+                highlight
+                    ? 'bg-[#ffe566]'
+                    : index % 2 === 0
+                      ? 'bg-white'
+                      : 'bg-neutral-100'
             }`}
         >
             <span className="w-7 shrink-0 text-sm font-bold text-black/70 sm:w-8 sm:text-base">
@@ -91,7 +45,7 @@ function ResultRow({ result, index }) {
                 <p className="mt-0.5 text-[11px] text-black/80 sm:text-xs">
                     at {timeLabel}{' '}
                     <a
-                        href={chartUrl(result)}
+                        href={chartUrl()}
                         target="_blank"
                         rel="noreferrer"
                         className="font-medium text-blue-600 underline"
@@ -102,11 +56,17 @@ function ResultRow({ result, index }) {
             </div>
 
             <div className="flex shrink-0 items-center gap-4 pr-1 sm:gap-8 sm:pr-2">
-                <span className="w-10 text-center text-xl font-bold tabular-nums text-black sm:w-12 sm:text-2xl">
-                    {left}
+                <span
+                    className="w-12 text-center text-xl font-bold tabular-nums text-black sm:w-14 sm:text-2xl"
+                    title={yesterdayLabel}
+                >
+                    {lastValue}
                 </span>
-                <span className="w-10 text-center text-xl font-bold tabular-nums text-black sm:w-12 sm:text-2xl">
-                    {right}
+                <span
+                    className="w-12 text-center text-xl font-bold tabular-nums text-black sm:w-14 sm:text-2xl"
+                    title={todayLabel}
+                >
+                    {todayValue}
                 </span>
             </div>
         </div>
@@ -152,7 +112,7 @@ export default function Result() {
     }, [load]);
 
     const rows = useMemo(() => {
-        const list = data?.results || data?.india_results || [];
+        const list = data?.results || [];
         const q = search.trim().toLowerCase();
         if (!q) return list;
         return list.filter((row) =>
@@ -163,7 +123,8 @@ export default function Result() {
     }, [data, search]);
 
     const latest = data?.latest;
-    const latestNums = latest ? rowNumbers(latest) : null;
+    const yesterdayLabel = data?.yesterday_label || 'Last';
+    const todayLabel = data?.today_label || 'Today';
 
     return (
         <AuthenticatedLayout>
@@ -173,11 +134,7 @@ export default function Result() {
                 <PageHeader
                     eyebrow="Live board"
                     title="Results"
-                    subtitle={
-                        data?.date
-                            ? `Search markets · numbered list · ${formatDay(data.date)}`
-                            : 'Search markets and view last results.'
-                    }
+                    subtitle="Last result always visible · today shows XX until declared."
                 />
 
                 {error && (
@@ -197,15 +154,28 @@ export default function Result() {
                                     {latest.name}
                                 </p>
                                 <p className="text-xs text-black/70">
-                                    at {latest.close_time || latest.open_time || '—'}
+                                    Always shown ·{' '}
+                                    {latest.display_value ||
+                                        latest.last_result ||
+                                        'XX'}
                                 </p>
                             </div>
-                            <span className="text-2xl font-bold tabular-nums">
-                                {latestNums.left}
-                            </span>
-                            <span className="text-2xl font-bold tabular-nums">
-                                {latestNums.right}
-                            </span>
+                            <div className="text-right">
+                                <p className="text-[10px] font-semibold uppercase text-black/50">
+                                    {yesterdayLabel}
+                                </p>
+                                <p className="text-2xl font-bold tabular-nums">
+                                    {latest.last_result || 'XX'}
+                                </p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-[10px] font-semibold uppercase text-black/50">
+                                    {todayLabel}
+                                </p>
+                                <p className="text-2xl font-bold tabular-nums">
+                                    {latest.today_result || 'XX'}
+                                </p>
+                            </div>
                         </div>
                     </section>
                 )}
@@ -234,12 +204,23 @@ export default function Result() {
                 </div>
 
                 <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-white/10">
-                    <div className="flex items-center gap-2 border-b border-black/10 bg-neutral-200 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-black/60 sm:gap-3 sm:px-4">
+                    <div className="bg-[#2ebc8d] px-3 py-3 text-center text-sm font-semibold text-white sm:px-4 sm:text-base">
+                        {data?.banner_text ||
+                            'Fast Results of Today & Yesterday'}
+                    </div>
+
+                    <div className="flex items-center gap-2 bg-[#3a3a3a] px-3 py-2.5 text-[11px] font-semibold text-white sm:gap-3 sm:px-4 sm:text-xs">
                         <span className="w-7 sm:w-8">#</span>
-                        <span className="min-w-0 flex-1">Market</span>
+                        <span className="min-w-0 flex-1">
+                            Regional Offline Draw Results
+                        </span>
                         <div className="flex shrink-0 items-center gap-4 pr-1 sm:gap-8 sm:pr-2">
-                            <span className="w-10 text-center sm:w-12">Open</span>
-                            <span className="w-10 text-center sm:w-12">Close</span>
+                            <span className="w-12 text-center sm:w-14">
+                                {yesterdayLabel}
+                            </span>
+                            <span className="w-12 text-center sm:w-14">
+                                {todayLabel}
+                            </span>
                         </div>
                     </div>
 
@@ -255,6 +236,8 @@ export default function Result() {
                                   key={result.id}
                                   result={result}
                                   index={index}
+                                  yesterdayLabel={yesterdayLabel}
+                                  todayLabel={todayLabel}
                               />
                           ))}
 
@@ -269,8 +252,8 @@ export default function Result() {
 
                 {!loading && data?.counts && (
                     <p className="mt-3 text-center text-xs text-app-muted">
-                        Showing {rows.length} · India {data.counts.india} ·
-                        Declared {data.counts.declared}
+                        Showing {rows.length} · Today declared{' '}
+                        {data.counts.declared} · Pending XX {data.counts.pending}
                     </p>
                 )}
             </div>

@@ -64,52 +64,56 @@ class SattaMatkaApi
     }
 
     /**
-     * Last day board: India markets first, full Open/Jodi/Close cases, latest on top.
+     * Today + yesterday board: last result always, today XX until declared.
      *
      * @return array<string, mixed>
      */
     public function toResultsPayload(?string $date = null): array
     {
-        $explicitDate = $date;
-        $date = $date ?: now('Asia/Kolkata')->toDateString();
+        $today = $date ?: now('Asia/Kolkata')->toDateString();
+        $yesterday = \Carbon\Carbon::parse($today, 'Asia/Kolkata')->subDay()->toDateString();
         $orders = $this->displayOrders();
 
-        $board = $this->board($date);
-        $mapped = $this->mapBoardRows($board['rows'], $date, $orders);
+        $todayBoard = $this->board($today);
+        $yesterdayBoard = $this->board($yesterday);
 
-        if ($mapped->filter(fn (array $i) => $i['has_result'])->isEmpty() && $explicitDate === null) {
-            $previous = now('Asia/Kolkata')->subDay()->toDateString();
-            $prevBoard = $this->board($previous);
-            $mapped = $this->mapBoardRows($prevBoard['rows'], $previous, $orders);
-            $date = $previous;
-            $board['error'] = $board['error'] ?? $prevBoard['error'];
-        }
+        $todayMapped = $this->mapBoardRows($todayBoard['rows'], $today, $orders)
+            ->keyBy(fn (array $row) => $this->marketKey($row));
+        $yesterdayMapped = $this->mapBoardRows($yesterdayBoard['rows'], $yesterday, $orders)
+            ->keyBy(fn (array $row) => $this->marketKey($row));
 
-        $sorted = $mapped
+        $keys = $todayMapped->keys()->merge($yesterdayMapped->keys())->unique()->values();
+
+        $merged = $keys->map(function (string $key) use ($todayMapped, $yesterdayMapped) {
+            $todayRow = $todayMapped->get($key);
+            $yesterdayRow = $yesterdayMapped->get($key);
+            $base = $todayRow ?? $yesterdayRow;
+            if (! $base) {
+                return null;
+            }
+
+            $lastDisplay = $this->dayDisplay($yesterdayRow, always: true);
+            $todayDisplay = $this->dayDisplay($todayRow, always: false);
+
+            return array_merge($base, [
+                'yesterday' => $yesterdayRow,
+                'today' => $todayRow,
+                'last_result' => $lastDisplay,
+                'today_result' => $todayDisplay,
+                'has_result' => ($todayRow['has_result'] ?? false) || ($yesterdayRow['has_result'] ?? false),
+            ]);
+        })->filter()->values();
+
+        $sorted = $merged
             ->sort(function (array $a, array $b) {
-                // India markets first
                 if (($a['is_india'] ? 1 : 0) !== ($b['is_india'] ? 1 : 0)) {
                     return ($b['is_india'] ? 1 : 0) <=> ($a['is_india'] ? 1 : 0);
                 }
 
-                // Then declared / fuller results
-                $ra = $this->resultRank($a);
-                $rb = $this->resultRank($b);
-                if ($ra !== $rb) {
-                    return $rb <=> $ra;
-                }
-
-                // Catalog display order
                 $oa = $a['display_order'] ?? 9999;
                 $ob = $b['display_order'] ?? 9999;
                 if ($oa !== $ob) {
                     return $oa <=> $ob;
-                }
-
-                $ta = strtotime((string) ($a['drawn_at'] ?? '')) ?: 0;
-                $tb = strtotime((string) ($b['drawn_at'] ?? '')) ?: 0;
-                if ($tb !== $ta) {
-                    return $tb <=> $ta;
                 }
 
                 return strcmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
@@ -118,32 +122,131 @@ class SattaMatkaApi
 
         $india = $sorted->where('is_india', true)->values();
         $others = $sorted->where('is_india', false)->values();
-        $declared = $sorted->where('has_result', true)->values();
+        $declaredToday = $sorted->filter(fn (array $r) => ($r['today_result'] ?? 'XX') !== 'XX')->values();
 
-        $latest = $declared
-            ->sortByDesc(fn (array $i) => strtotime((string) ($i['drawn_at'] ?? '')) ?: 0)
+        $latest = $sorted
+            ->filter(fn (array $r) => ($r['today']['has_result'] ?? false) || ($r['yesterday']['has_result'] ?? false))
+            ->sortByDesc(function (array $r) {
+                $t = $r['today']['drawn_at'] ?? null;
+                $y = $r['yesterday']['drawn_at'] ?? null;
+                $ts = max(
+                    $t ? (strtotime((string) $t) ?: 0) : 0,
+                    $y ? (strtotime((string) $y) ?: 0) : 0,
+                );
+
+                return $ts;
+            })
+            ->map(function (array $r) {
+                $src = ($r['today']['has_result'] ?? false) ? $r['today'] : $r['yesterday'];
+
+                return array_merge($src ?? $r, [
+                    'last_result' => $r['last_result'],
+                    'today_result' => $r['today_result'],
+                    'display_value' => ($r['today']['has_result'] ?? false)
+                        ? $r['today_result']
+                        : $r['last_result'],
+                ]);
+            })
             ->first();
+
+        $error = $todayBoard['error'] ?? $yesterdayBoard['error'];
 
         return [
             'latest' => $latest,
             'results' => $sorted->all(),
             'india_results' => $india->all(),
             'other_results' => $others->all(),
-            'declared' => $declared->all(),
-            'date' => $date,
+            'declared' => $declaredToday->all(),
+            'date' => $today,
+            'today_date' => $today,
+            'yesterday_date' => $yesterday,
+            'today_label' => $this->shortDayLabel($today),
+            'yesterday_label' => $this->shortDayLabel($yesterday),
+            'banner_text' => sprintf(
+                'Fast Results of %s & %s',
+                \Carbon\Carbon::parse($today)->format('F j, Y'),
+                \Carbon\Carbon::parse($yesterday)->format('F j, Y'),
+            ),
             'source' => 'sattamatkaapi.live',
             'counts' => [
                 'total' => $sorted->count(),
                 'india' => $india->count(),
                 'other' => $others->count(),
-                'declared' => $declared->count(),
-                'full' => $declared->where('is_complete', true)->count(),
-                'open' => $sorted->where('status', 'open')->count(),
-                'pending' => $sorted->where('status', 'pending')->count(),
-                'holiday' => $sorted->whereIn('status', ['holiday', 'off_today'])->count(),
+                'declared' => $declaredToday->count(),
+                'full' => $declaredToday->where('is_complete', true)->count(),
+                'open' => $sorted->filter(fn ($r) => ($r['today']['status'] ?? '') === 'open')->count(),
+                'pending' => $sorted->filter(fn ($r) => ($r['today_result'] ?? 'XX') === 'XX')->count(),
+                'holiday' => $sorted->filter(fn ($r) => in_array($r['today']['status'] ?? '', ['holiday', 'off_today'], true))->count(),
             ],
-            'error' => $board['error'],
+            'error' => $error,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     */
+    protected function marketKey(array $row): string
+    {
+        return strtolower((string) ($row['slug'] ?? $row['name'] ?? $row['id'] ?? uniqid('m', true)));
+    }
+
+    /**
+     * Single-cell display for a day column.
+     * Today: XX until declared. Last day: always show best available (or XX).
+     *
+     * @param  array<string, mixed>|null  $row
+     */
+    protected function dayDisplay(?array $row, bool $always): string
+    {
+        if (! $row) {
+            return 'XX';
+        }
+
+        $has = (bool) ($row['has_result'] ?? false);
+        if (! $always && ! $has) {
+            return 'XX';
+        }
+
+        $jodi = $this->strOrNull($row['jodi'] ?? null);
+        if ($jodi && ! str_contains($jodi, '*') && preg_match('/^\d{2}$/', $jodi)) {
+            return $jodi;
+        }
+
+        $openAnk = $this->strOrNull($row['open_ank'] ?? null);
+        $closeAnk = $this->strOrNull($row['close_ank'] ?? null);
+        if ($openAnk !== null && $closeAnk !== null) {
+            return $openAnk.$closeAnk;
+        }
+
+        if ($jodi) {
+            $clean = preg_replace('/\D/', '', $jodi) ?: '';
+            if (strlen($clean) >= 2) {
+                return substr($clean, 0, 2);
+            }
+            if ($always && $openAnk !== null) {
+                return str_pad($openAnk, 2, '0', STR_PAD_LEFT);
+            }
+        }
+
+        if ($always && $openAnk !== null) {
+            return str_pad($openAnk, 2, '0', STR_PAD_LEFT);
+        }
+
+        $resultString = $this->strOrNull($row['result_string'] ?? null);
+        if ($always && $resultString) {
+            $parts = preg_split('/[-–]/', $resultString) ?: [];
+            $first = preg_replace('/\D/', '', (string) ($parts[0] ?? '')) ?: '';
+            if ($first !== '') {
+                return strlen($first) === 1 ? str_pad($first, 2, '0', STR_PAD_LEFT) : substr($first, 0, 2);
+            }
+        }
+
+        return 'XX';
+    }
+
+    protected function shortDayLabel(string $date): string
+    {
+        return \Carbon\Carbon::parse($date, 'Asia/Kolkata')->format('D. jS');
     }
 
     /**
