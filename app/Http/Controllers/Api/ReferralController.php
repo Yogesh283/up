@@ -18,33 +18,11 @@ class ReferralController extends Controller
             'code' => $code,
             'share_link' => url('/register?ref='.$code),
             'stats' => [
-                'invited' => 8,
-                'joined' => 5,
-                'earned' => 250,
+                'invited' => 0,
+                'joined' => 0,
+                'earned' => 0,
             ],
-            'referrals' => [
-                [
-                    'name' => 'Amit S.',
-                    'mobile' => '+91 ****3210',
-                    'status' => 'joined',
-                    'reward' => 50,
-                    'joined_at' => now()->subDays(2)->toIso8601String(),
-                ],
-                [
-                    'name' => 'Priya K.',
-                    'mobile' => '+91 ****8871',
-                    'status' => 'joined',
-                    'reward' => 50,
-                    'joined_at' => now()->subDays(5)->toIso8601String(),
-                ],
-                [
-                    'name' => 'Rahul M.',
-                    'mobile' => '+91 ****4422',
-                    'status' => 'pending',
-                    'reward' => 0,
-                    'joined_at' => now()->subDays(7)->toIso8601String(),
-                ],
-            ],
+            'referrals' => [],
         ]);
     }
 }

@@ -10,8 +10,11 @@ class DepositController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user();
+        $balance = (float) $user->wallet_balance;
+
         return response()->json([
-            'balance' => 2500,
+            'balance' => $balance,
             'min_amount' => 100,
             'max_amount' => 50000,
             'quick_amounts' => [100, 200, 500, 1000, 2000],
@@ -20,22 +23,7 @@ class DepositController extends Controller
                 ['id' => 'card', 'label' => 'Card', 'hint' => 'Visa / Mastercard'],
                 ['id' => 'netbanking', 'label' => 'Net Banking', 'hint' => 'All banks'],
             ],
-            'recent' => [
-                [
-                    'id' => 'DP-2201',
-                    'amount' => 500,
-                    'method' => 'UPI',
-                    'status' => 'completed',
-                    'created_at' => now()->subHours(8)->toIso8601String(),
-                ],
-                [
-                    'id' => 'DP-2198',
-                    'amount' => 1000,
-                    'method' => 'UPI',
-                    'status' => 'completed',
-                    'created_at' => now()->subDays(1)->toIso8601String(),
-                ],
-            ],
+            'recent' => [],
         ]);
     }
 
@@ -49,12 +37,13 @@ class DepositController extends Controller
         return response()->json([
             'message' => 'Deposit request created successfully.',
             'transaction' => [
-                'id' => 'DP-'.random_int(3000, 9999),
+                'id' => 'DP-'.now()->format('YmdHis').random_int(10, 99),
                 'amount' => (float) $validated['amount'],
                 'method' => $validated['method'],
                 'status' => 'processing',
                 'created_at' => now()->toIso8601String(),
             ],
+            'balance' => (float) $request->user()->wallet_balance,
         ], 201);
     }
 }

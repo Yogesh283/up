@@ -31,7 +31,7 @@ class UserFactory extends Factory
             'mobile' => fake()->unique()->numerify('9#########'),
             'email_verified_at' => now(),
             'password' => static::$password ??= Hash::make('password'),
-            'wallet_balance' => 2500,
+            'wallet_balance' => 0,
             'remember_token' => Str::random(10),
         ];
     }

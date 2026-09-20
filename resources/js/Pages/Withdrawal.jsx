@@ -87,7 +87,7 @@ export default function Withdrawal() {
                                     id="amount"
                                     type="number"
                                     min={data?.min_amount || 200}
-                                    max={data?.max_amount || 2500}
+                                    max={data?.max_amount || data?.balance || 0}
                                     value={amount}
                                     onChange={(e) => setAmount(e.target.value)}
                                     className="auth-field"

@@ -60,6 +60,7 @@ class RegisteredUserController extends Controller
             'country_code' => $request->country_code,
             'mobile' => $request->mobile,
             'password' => Hash::make($request->password),
+            'wallet_balance' => 0,
             'email_verified_at' => now(),
         ]);
 
