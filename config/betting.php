@@ -24,16 +24,14 @@ return [
     ],
 
     /*
-    | Kalyan Matka style:
-    | - Single Open/Close (0–9) → ank
-    | - Jodi (00–99)
-    | - Open/Close Pana (000–999)
+    | Kalyan Matka rates:
+    | Single No 9× · Jodi No 90× · Patti No 900×
     */
     'matka' => [
         'types' => [
             'single_open' => [
-                'label' => 'Single Open',
-                'hint' => '0–9 · Open ank',
+                'label' => 'Single No',
+                'hint' => '0–9 · Open · 9×',
                 'multiplier' => (float) env('BET_MATKA_SINGLE_MULT', 9),
                 'digits' => 1,
                 'min' => 0,
@@ -41,8 +39,8 @@ return [
                 'session' => 'open',
             ],
             'single_close' => [
-                'label' => 'Single Close',
-                'hint' => '0–9 · Close ank',
+                'label' => 'Single No (Close)',
+                'hint' => '0–9 · Close · 9×',
                 'multiplier' => (float) env('BET_MATKA_SINGLE_MULT', 9),
                 'digits' => 1,
                 'min' => 0,
@@ -50,8 +48,8 @@ return [
                 'session' => 'close',
             ],
             'jodi' => [
-                'label' => 'Jodi',
-                'hint' => '00–99',
+                'label' => 'Jodi No',
+                'hint' => '00–99 · 90×',
                 'multiplier' => (float) env('BET_MATKA_JODI_MULT', 90),
                 'digits' => 2,
                 'min' => 0,
@@ -59,18 +57,18 @@ return [
                 'session' => 'jodi',
             ],
             'pana_open' => [
-                'label' => 'Open Pana',
-                'hint' => '3 digit open',
-                'multiplier' => (float) env('BET_MATKA_PANA_MULT', 140),
+                'label' => 'Patti No',
+                'hint' => '3 digit open · 900×',
+                'multiplier' => (float) env('BET_MATKA_PATTI_MULT', env('BET_MATKA_PANA_MULT', 900)),
                 'digits' => 3,
                 'min' => 0,
                 'max' => 999,
                 'session' => 'open',
             ],
             'pana_close' => [
-                'label' => 'Close Pana',
-                'hint' => '3 digit close',
-                'multiplier' => (float) env('BET_MATKA_PANA_MULT', 140),
+                'label' => 'Patti No (Close)',
+                'hint' => '3 digit close · 900×',
+                'multiplier' => (float) env('BET_MATKA_PATTI_MULT', env('BET_MATKA_PANA_MULT', 900)),
                 'digits' => 3,
                 'min' => 0,
                 'max' => 999,

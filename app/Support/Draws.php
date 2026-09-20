@@ -175,7 +175,7 @@ class Draws
             'display_name' => $name.' · Kalyan Matka',
             'draw_at' => $drawAt,
             'time_label' => $timeLabel,
-            'prize' => 'Single 9× · Jodi 90× · Pana 140×',
+            'prize' => 'Single 9× · Jodi 90× · Patti 900×',
             'ticket_price' => 1,
             'ticket_price_display' => '₹1+',
             'pick_count' => 1,
