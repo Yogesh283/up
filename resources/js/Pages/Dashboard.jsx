@@ -15,6 +15,10 @@ function formatDrawTime(iso) {
     });
 }
 
+function pad2(n) {
+    return String(n).padStart(2, '0');
+}
+
 function StatSkeleton() {
     return (
         <div className="animate-pulse rounded-2xl bg-card p-4 shadow-sm ring-1 ring-white/10">
@@ -31,8 +35,11 @@ export default function Dashboard() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    const [board, setBoard] = useState('king');
+    const [marketSearch, setMarketSearch] = useState('');
     const [selectedDrawId, setSelectedDrawId] = useState(null);
     const [selectedNumbers, setSelectedNumbers] = useState([]);
+    const [betAmount, setBetAmount] = useState('');
     const [placing, setPlacing] = useState(false);
     const [betMessage, setBetMessage] = useState(null);
     const [betError, setBetError] = useState(null);
@@ -44,9 +51,21 @@ export default function Dashboard() {
             .then((response) => {
                 setData(response.data);
                 setError(null);
-                if (!selectedDrawId && response.data.upcoming_draws?.length) {
-                    setSelectedDrawId(response.data.upcoming_draws[0].id);
-                }
+
+                const draws = response.data.upcoming_draws || [];
+                const ticket = response.data.betting?.ticket_price ?? 10;
+                setBetAmount((prev) => (prev === '' ? String(ticket) : prev));
+
+                setSelectedDrawId((prev) => {
+                    if (prev && draws.some((d) => d.id === prev)) {
+                        return prev;
+                    }
+                    const preferred =
+                        draws.find((d) => d.board === board && d.status === 'open') ||
+                        draws.find((d) => d.status === 'open') ||
+                        draws[0];
+                    return preferred?.id ?? null;
+                });
             })
             .catch(() => {
                 setError('Could not load dashboard data. Try again.');
@@ -61,19 +80,53 @@ export default function Dashboard() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    const betting = data?.betting || {};
+    const pickCount = betting.pick_count || 1;
+    const minNumber = betting.min_number ?? 0;
+    const maxNumber = betting.max_number ?? 99;
+    const defaultTicket = betting.ticket_price ?? 10;
+    const minAmount = betting.min_amount ?? defaultTicket;
+    const maxAmount = betting.max_amount ?? 10000;
+    const prizeMultiplier = betting.prize_multiplier ?? 90;
+
+    const boardDraws = useMemo(() => {
+        const list = (data?.upcoming_draws || []).filter((d) => d.board === board);
+        const q = marketSearch.trim().toLowerCase();
+        if (!q) return list;
+        return list.filter((d) => String(d.name || '').toLowerCase().includes(q));
+    }, [data, board, marketSearch]);
+
     const selectedDraw = useMemo(
-        () => data?.upcoming_draws?.find((d) => d.id === selectedDrawId) || null,
+        () =>
+            data?.upcoming_draws?.find((d) => d.id === selectedDrawId) || null,
         [data, selectedDrawId],
     );
 
-    const pickCount = selectedDraw?.pick_count || 6;
-    const maxNumber = selectedDraw?.max_number || 49;
-    const ticketPrice = selectedDraw?.ticket_price_value || 0;
+    const amountValue = Number(betAmount) || 0;
+    const potentialWin = amountValue > 0 ? amountValue * prizeMultiplier : 0;
 
     const numberPool = useMemo(
-        () => Array.from({ length: maxNumber }, (_, i) => i + 1),
-        [maxNumber],
+        () =>
+            Array.from(
+                { length: maxNumber - minNumber + 1 },
+                (_, i) => minNumber + i,
+            ),
+        [minNumber, maxNumber],
     );
+
+    const selectBoard = (next) => {
+        setBoard(next);
+        setMarketSearch('');
+        setSelectedNumbers([]);
+        setBetError(null);
+        setBetMessage(null);
+        const first =
+            (data?.upcoming_draws || []).find(
+                (d) => d.board === next && d.status === 'open',
+            ) ||
+            (data?.upcoming_draws || []).find((d) => d.board === next);
+        setSelectedDrawId(first?.id ?? null);
+    };
 
     const toggleNumber = (n) => {
         setBetMessage(null);
@@ -81,6 +134,9 @@ export default function Dashboard() {
         setSelectedNumbers((prev) => {
             if (prev.includes(n)) {
                 return prev.filter((x) => x !== n);
+            }
+            if (pickCount === 1) {
+                return [n];
             }
             if (prev.length >= pickCount) {
                 return prev;
@@ -109,11 +165,25 @@ export default function Dashboard() {
 
     const placeBet = async () => {
         if (!selectedDraw) {
-            setBetError('Please select a draw.');
+            setBetError('Please select a market.');
+            return;
+        }
+        if (selectedDraw.status !== 'open') {
+            setBetError('This market is closed — result already declared.');
             return;
         }
         if (selectedNumbers.length !== pickCount) {
-            setBetError(`Select exactly ${pickCount} numbers.`);
+            setBetError(
+                pickCount === 1
+                    ? 'Select 1 number (00–99).'
+                    : `Select exactly ${pickCount} numbers.`,
+            );
+            return;
+        }
+        if (amountValue < minAmount || amountValue > maxAmount) {
+            setBetError(
+                `Amount must be between ${formatMoney(minAmount)} and ${formatMoney(maxAmount)}.`,
+            );
             return;
         }
 
@@ -124,7 +194,9 @@ export default function Dashboard() {
         try {
             const response = await axios.post(route('api.bets.store'), {
                 draw_id: selectedDraw.id,
+                board: selectedDraw.board,
                 numbers: selectedNumbers,
+                amount: amountValue,
             });
             setBetMessage(response.data.message);
             setSelectedNumbers([]);
@@ -135,6 +207,7 @@ export default function Dashboard() {
                 errors?.numbers?.[0] ||
                     errors?.amount?.[0] ||
                     errors?.draw_id?.[0] ||
+                    errors?.board?.[0] ||
                     err.response?.data?.message ||
                     'Could not place bet. Try again.',
             );
@@ -156,7 +229,8 @@ export default function Dashboard() {
                         Hi, {auth.user?.name?.split(' ')[0] || 'Player'}
                     </h1>
                     <p className="mt-1 text-sm text-app-muted">
-                        Select a draw, pick your numbers, and place your bet.
+                        Satta King ya Kalyan Matka — kisi bhi market pe number
+                        select karke bet lagao.
                     </p>
                 </div>
 
@@ -201,59 +275,137 @@ export default function Dashboard() {
                                 Place a bet
                             </h2>
                             <p className="mt-0.5 text-xs text-app-muted">
-                                Choose draw · pick {pickCount} numbers · confirm
+                                Board → market → number (00–99) → amount
                             </p>
                         </div>
                         <p className="text-sm text-app-text">
-                            Ticket:{' '}
+                            Win ×{prizeMultiplier}:{' '}
                             <span className="font-semibold text-gold">
-                                {selectedDraw
-                                    ? selectedDraw.ticket_price
+                                {potentialWin
+                                    ? formatMoney(potentialWin)
                                     : '—'}
                             </span>
                         </p>
                     </div>
 
-                    <div className="mb-4">
-                        <p className="mb-2 text-xs font-medium uppercase tracking-wide text-app-muted">
-                            Select draw
-                        </p>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                            {(data?.upcoming_draws || []).map((draw) => {
-                                const active = selectedDrawId === draw.id;
-                                return (
-                                    <button
-                                        key={draw.id}
-                                        type="button"
-                                        onClick={() => {
-                                            setSelectedDrawId(draw.id);
-                                            setSelectedNumbers([]);
-                                            setBetError(null);
-                                            setBetMessage(null);
-                                        }}
-                                        className={`rounded-xl border px-4 py-3 text-left transition ${
-                                            active
-                                                ? 'border-gold bg-gold/10'
-                                                : 'border-white/10 bg-navy-dark/40 hover:border-white/20'
-                                        }`}
-                                    >
-                                        <p className="text-sm font-semibold text-white">
+                    <div className="mb-4 flex gap-2">
+                        {[
+                            { id: 'king', label: 'Satta King' },
+                            { id: 'matka', label: 'Kalyan Matka' },
+                        ].map((tab) => {
+                            const active = board === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    type="button"
+                                    onClick={() => selectBoard(tab.id)}
+                                    className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                                        active
+                                            ? 'bg-gold text-navy-dark'
+                                            : 'bg-navy-dark/60 text-app-muted ring-1 ring-white/10 hover:text-white'
+                                    }`}
+                                >
+                                    {tab.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <div className="mb-3">
+                        <input
+                            type="search"
+                            value={marketSearch}
+                            onChange={(e) => setMarketSearch(e.target.value)}
+                            placeholder="Search market name…"
+                            className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-2.5 text-sm text-white placeholder:text-app-muted focus:border-gold/40 focus:outline-none"
+                        />
+                    </div>
+
+                    <div className="mb-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+                        {boardDraws.map((draw) => {
+                            const active = selectedDrawId === draw.id;
+                            const closed = draw.status !== 'open';
+                            return (
+                                <button
+                                    key={draw.id}
+                                    type="button"
+                                    disabled={closed}
+                                    onClick={() => {
+                                        setSelectedDrawId(draw.id);
+                                        setSelectedNumbers([]);
+                                        setBetError(null);
+                                        setBetMessage(null);
+                                    }}
+                                    className={`flex w-full items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition ${
+                                        active
+                                            ? 'border-gold bg-gold/10'
+                                            : closed
+                                              ? 'cursor-not-allowed border-white/5 bg-navy-dark/20 opacity-50'
+                                              : 'border-white/10 bg-navy-dark/40 hover:border-white/20'
+                                    }`}
+                                >
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-semibold text-white">
                                             {draw.name}
                                         </p>
                                         <p className="mt-0.5 text-xs text-app-muted">
-                                            {formatDrawTime(draw.draw_at)} ·{' '}
-                                            {draw.ticket_price} · Prize{' '}
+                                            {draw.time_label ||
+                                                formatDrawTime(draw.draw_at)}{' '}
+                                            · {draw.ticket_price} · Prize{' '}
                                             {draw.prize}
                                         </p>
-                                    </button>
-                                );
-                            })}
+                                    </div>
+                                    <span
+                                        className={`shrink-0 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${
+                                            closed
+                                                ? 'bg-white/10 text-app-muted'
+                                                : 'bg-success/20 text-success'
+                                        }`}
+                                    >
+                                        {closed
+                                            ? draw.current_result || 'Closed'
+                                            : 'Open'}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                        {!loading && boardDraws.length === 0 && (
+                            <p className="py-4 text-center text-sm text-app-muted">
+                                {marketSearch
+                                    ? 'No market matched your search.'
+                                    : 'No markets loaded yet. Try Refresh.'}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                        <label className="block">
+                            <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
+                                Bet amount (₹)
+                            </span>
+                            <input
+                                type="number"
+                                min={minAmount}
+                                max={maxAmount}
+                                step="1"
+                                value={betAmount}
+                                onChange={(e) => setBetAmount(e.target.value)}
+                                className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-2.5 text-sm text-white focus:border-gold/40 focus:outline-none"
+                            />
+                        </label>
+                        <div className="flex items-end">
+                            <p className="w-full rounded-xl border border-white/10 bg-navy-dark/30 px-4 py-2.5 text-sm text-app-muted">
+                                Selected:{' '}
+                                <span className="font-semibold text-white">
+                                    {selectedDraw?.name || '—'}
+                                </span>
+                            </p>
                         </div>
                     </div>
 
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-medium uppercase tracking-wide text-app-muted">
-                            Your numbers ({selectedNumbers.length}/{pickCount})
+                            Your number ({selectedNumbers.length}/{pickCount})
                         </p>
                         <div className="flex gap-2">
                             <button
@@ -278,19 +430,21 @@ export default function Dashboard() {
                             {selectedNumbers.map((n) => (
                                 <span
                                     key={`sel-${n}`}
-                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-gold text-xs font-bold text-navy-dark"
+                                    className="flex h-9 min-w-9 items-center justify-center rounded-full bg-gold px-2 text-sm font-bold text-navy-dark"
                                 >
-                                    {n}
+                                    {pad2(n)}
                                 </span>
                             ))}
                         </div>
                     )}
 
-                    <div className="mb-4 grid grid-cols-7 gap-1.5 sm:grid-cols-10">
+                    <div className="mb-4 grid grid-cols-10 gap-1.5">
                         {numberPool.map((n) => {
                             const active = selectedNumbers.includes(n);
                             const full =
-                                !active && selectedNumbers.length >= pickCount;
+                                pickCount > 1 &&
+                                !active &&
+                                selectedNumbers.length >= pickCount;
                             return (
                                 <button
                                     key={n}
@@ -305,7 +459,7 @@ export default function Dashboard() {
                                               : 'bg-navy-dark text-app-text hover:bg-blue'
                                     }`}
                                 >
-                                    {n}
+                                    {pad2(n)}
                                 </button>
                             );
                         })}
@@ -318,13 +472,14 @@ export default function Dashboard() {
                             placing ||
                             loading ||
                             !selectedDraw ||
+                            selectedDraw.status !== 'open' ||
                             selectedNumbers.length !== pickCount
                         }
                         className="auth-btn"
                     >
                         {placing
                             ? 'Placing bet…'
-                            : `Place bet · ${formatMoney(ticketPrice)}`}
+                            : `Place bet · ${formatMoney(amountValue || defaultTicket)}`}
                     </button>
                 </section>
 
@@ -367,10 +522,14 @@ export default function Dashboard() {
                                             <StatusBadge status={bet.status} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {bet.numbers?.map((n) => (
+                                            {(
+                                                bet.numbers_display ||
+                                                bet.numbers ||
+                                                []
+                                            ).map((n) => (
                                                 <span
                                                     key={`${bet.id}-${n}`}
-                                                    className="flex h-7 w-7 items-center justify-center rounded-full bg-gold text-[11px] font-semibold text-navy-dark"
+                                                    className="flex h-7 min-w-7 items-center justify-center rounded-full bg-gold px-1.5 text-[11px] font-semibold text-navy-dark"
                                                 >
                                                     {n}
                                                 </span>
@@ -429,7 +588,11 @@ export default function Dashboard() {
                                                 ? result.numbers
                                                 : result.result_string
                                                   ? [result.result_string]
-                                                  : []
+                                                  : result.today_result &&
+                                                      result.today_result !==
+                                                          'XX'
+                                                    ? [result.today_result]
+                                                    : []
                                             ).map((n, index) => (
                                                 <span
                                                     key={`${result.id}-${n}-${index}`}
