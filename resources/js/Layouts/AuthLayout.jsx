@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react';
+import BrandLogo from '@/Components/BrandLogo';
 
 export default function AuthLayout({ title, subtitle, children, compact = false }) {
     if (compact) {
@@ -15,16 +16,13 @@ export default function AuthLayout({ title, subtitle, children, compact = false 
 
                 <div className="auth-panel relative z-10 w-full max-w-[320px]">
                     <div className="mb-3 flex justify-center">
-                        <Link
-                            href={route('login')}
-                            className="inline-flex items-center gap-2 text-white"
-                        >
-                            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gold text-xs font-bold text-navy-dark">
-                                L
-                            </span>
-                            <span className="font-display text-lg font-semibold tracking-tight">
-                                Lottery
-                            </span>
+                        <Link href={route('login')} className="text-white">
+                            <BrandLogo
+                                variant="mark"
+                                size="sm"
+                                showWordmark
+                                className="[&>span:last-child]:text-lg"
+                            />
                         </Link>
                     </div>
 
@@ -60,16 +58,13 @@ export default function AuthLayout({ title, subtitle, children, compact = false 
             />
 
             <aside className="relative z-10 hidden w-[46%] flex-col justify-between px-12 py-10 text-white lg:flex xl:px-16">
-                <Link
-                    href={route('login')}
-                    className="auth-fade-in inline-flex items-center gap-3"
-                >
-                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gold text-lg font-bold tracking-tight text-navy-dark">
-                        L
-                    </span>
-                    <span className="font-display text-2xl font-semibold tracking-tight">
-                        Lottery
-                    </span>
+                <Link href={route('login')} className="auth-fade-in">
+                    <BrandLogo
+                        variant="mark"
+                        size="lg"
+                        showWordmark
+                        className="[&>span:last-child]:text-2xl"
+                    />
                 </Link>
 
                 <div className="auth-fade-up max-w-md space-y-5">
@@ -86,33 +81,32 @@ export default function AuthLayout({ title, subtitle, children, compact = false 
                 </div>
 
                 <div
-                    className="auth-float flex gap-3 text-app-muted"
+                    className="auth-float flex items-center gap-3"
                     aria-hidden="true"
                 >
-                    {['01', '18', '27', '36'].map((n) => (
-                        <span
-                            key={n}
-                            className="flex h-12 w-12 items-center justify-center rounded-full border border-gold/30 bg-gold/10 font-display text-sm tracking-wide text-gold"
-                        >
-                            {n}
-                        </span>
-                    ))}
+                    <img
+                        src="/images/brand/logo-up.png"
+                        alt=""
+                        className="h-12 w-12 rounded-xl object-cover ring-1 ring-gold/30"
+                    />
+                    <img
+                        src="/images/brand/logo-down.png"
+                        alt=""
+                        className="h-12 w-12 rounded-xl object-cover ring-1 ring-gold/30"
+                    />
                 </div>
             </aside>
 
             <main className="relative z-10 flex flex-1 flex-col px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:px-6 sm:pb-10 sm:pt-8 lg:w-[54%] lg:justify-center lg:bg-navy-dark lg:px-12 lg:py-10">
                 <div className="mx-auto flex w-full max-w-[400px] flex-1 flex-col lg:max-w-md lg:flex-none">
                     <div className="mb-5 flex shrink-0 items-center justify-between lg:hidden">
-                        <Link
-                            href={route('login')}
-                            className="inline-flex items-center gap-2.5 text-white"
-                        >
-                            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gold text-sm font-bold text-navy-dark">
-                                L
-                            </span>
-                            <span className="font-display text-xl font-semibold tracking-tight">
-                                Lottery
-                            </span>
+                        <Link href={route('login')} className="text-white">
+                            <BrandLogo
+                                variant="mark"
+                                size="md"
+                                showWordmark
+                                className="[&>span:last-child]:text-xl"
+                            />
                         </Link>
                     </div>
 

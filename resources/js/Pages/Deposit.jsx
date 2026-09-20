@@ -54,7 +54,7 @@ export default function Deposit() {
                 <PageHeader
                     eyebrow="Wallet"
                     title="Deposit"
-                    subtitle="Add money to your Lottery wallet."
+                    subtitle="Add money to your UpDown wallet."
                 />
 
                 {(error || formError) && (

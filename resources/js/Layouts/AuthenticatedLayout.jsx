@@ -1,5 +1,6 @@
 import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
+import BrandLogo from '@/Components/BrandLogo';
 
 const menuItems = [
     { name: 'Dashboard', href: '/dashboard' },
@@ -52,15 +53,14 @@ export default function AuthenticatedLayout({ children }) {
                 <div className="mx-auto flex h-full max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
                     <Link
                         href="/dashboard"
-                        className="inline-flex items-center gap-2.5"
                         onClick={() => setMenuOpen(false)}
                     >
-                        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gold text-sm font-bold text-navy-dark">
-                            L
-                        </span>
-                        <span className="font-display text-lg font-semibold tracking-tight text-white">
-                            Lottery
-                        </span>
+                        <BrandLogo
+                            variant="mark"
+                            size="md"
+                            showWordmark
+                            className="[&>span:last-child]:text-lg"
+                        />
                     </Link>
 
                     <div className="flex items-center gap-2 sm:gap-3">
