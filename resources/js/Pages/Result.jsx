@@ -4,6 +4,48 @@ import { formatDateTime } from '@/lib/format';
 import useApiData from '@/hooks/useApiData';
 import { Head } from '@inertiajs/react';
 
+function ResultDigits({ values, size = 'md' }) {
+    const box =
+        size === 'lg'
+            ? 'min-w-10 h-10 px-2 text-sm'
+            : 'min-w-8 h-8 px-1.5 text-xs';
+
+    if (!values?.length) {
+        return (
+            <span className="text-sm text-app-muted">Awaiting result…</span>
+        );
+    }
+
+    return (
+        <div className="flex flex-wrap items-center gap-2">
+            {values.map((n, index) => (
+                <span
+                    key={`${n}-${index}`}
+                    className={`inline-flex items-center justify-center rounded-full bg-gold font-semibold text-navy-dark ${box}`}
+                >
+                    {n}
+                </span>
+            ))}
+        </div>
+    );
+}
+
+function ResultMeta({ result }) {
+    const bits = [
+        result.open_time && result.close_time
+            ? `${result.open_time} – ${result.close_time}`
+            : null,
+        result.status_label || result.status,
+        result.drawn_at ? formatDateTime(result.drawn_at) : null,
+    ].filter(Boolean);
+
+    return (
+        <p className="mt-1 text-xs text-app-muted sm:text-sm text-white/70">
+            {bits.join(' · ')}
+        </p>
+    );
+}
+
 export default function Result() {
     const { data, loading, error } = useApiData('api.results');
 
@@ -13,9 +55,9 @@ export default function Result() {
 
             <div className="mx-auto max-w-6xl px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-8 lg:px-8">
                 <PageHeader
-                    eyebrow="Draws"
+                    eyebrow="Live board"
                     title="Results"
-                    subtitle="Latest winning numbers from completed draws."
+                    subtitle="Live market results from Satta Matka API — jo API bhejegi, wahi dikhega."
                 />
 
                 {error && (
@@ -32,23 +74,43 @@ export default function Result() {
                         <h2 className="mt-2 font-display text-xl font-semibold">
                             {data.latest.name}
                         </h2>
-                        <p className="mt-1 text-sm text-white/70">
-                            {formatDateTime(data.latest.drawn_at)} · Prize{' '}
-                            {data.latest.prize}
-                        </p>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                            {data.latest.numbers?.map((n) => (
-                                <span
-                                    key={`latest-${n}`}
-                                    className="flex h-10 w-10 items-center justify-center rounded-full bg-gold text-navy-dark text-sm font-semibold"
-                                >
-                                    {n}
-                                </span>
-                            ))}
+                        <ResultMeta result={data.latest} />
+                        <div className="mt-4">
+                            <ResultDigits
+                                values={
+                                    data.latest.numbers?.length
+                                        ? data.latest.numbers
+                                        : data.latest.result_string
+                                          ? [data.latest.result_string]
+                                          : []
+                                }
+                                size="lg"
+                            />
                         </div>
-                        <p className="mt-4 text-xs text-white/60">
-                            {data.latest.winners} winners
-                        </p>
+                        {(data.latest.open_pana ||
+                            data.latest.jodi ||
+                            data.latest.close_pana) && (
+                            <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs sm:text-sm">
+                                <div className="rounded-xl bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                                    <p className="text-white/50">Open</p>
+                                    <p className="mt-1 font-semibold text-gold">
+                                        {data.latest.open_pana || '—'}
+                                    </p>
+                                </div>
+                                <div className="rounded-xl bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                                    <p className="text-white/50">Jodi</p>
+                                    <p className="mt-1 font-semibold text-gold">
+                                        {data.latest.jodi || '—'}
+                                    </p>
+                                </div>
+                                <div className="rounded-xl bg-white/5 px-2 py-2 ring-1 ring-white/10">
+                                    <p className="text-white/50">Close</p>
+                                    <p className="mt-1 font-semibold text-gold">
+                                        {data.latest.close_pana || '—'}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
                     </section>
                 )}
 
@@ -70,26 +132,31 @@ export default function Result() {
                                           <p className="text-sm font-semibold text-white">
                                               {result.name}
                                           </p>
-                                          <p className="mt-0.5 text-xs text-app-muted">
-                                              {formatDateTime(result.drawn_at)}
-                                          </p>
+                                          <ResultMeta result={result} />
                                       </div>
-                                      <p className="text-sm font-semibold text-gold">
-                                          {result.prize}
+                                      <p className="shrink-0 rounded-full bg-white/5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gold ring-1 ring-gold/20">
+                                          {result.status}
                                       </p>
                                   </div>
-                                  <div className="mt-3 flex flex-wrap gap-2">
-                                      {result.numbers?.map((n) => (
-                                          <span
-                                              key={`${result.id}-${n}`}
-                                              className="flex h-8 w-8 items-center justify-center rounded-full bg-gold text-xs font-semibold text-navy-dark"
-                                          >
-                                              {n}
-                                          </span>
-                                      ))}
+                                  <div className="mt-3">
+                                      <ResultDigits
+                                          values={
+                                              result.numbers?.length
+                                                  ? result.numbers
+                                                  : result.result_string
+                                                    ? [result.result_string]
+                                                    : []
+                                          }
+                                      />
                                   </div>
                               </article>
                           ))}
+
+                    {!loading && !data?.results?.length && !error && (
+                        <p className="rounded-2xl bg-card px-4 py-8 text-center text-sm text-app-muted ring-1 ring-white/10">
+                            No results from API yet.
+                        </p>
+                    )}
                 </div>
             </div>
         </AuthenticatedLayout>

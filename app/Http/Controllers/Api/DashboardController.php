@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\SattaMatkaApi;
 use App\Support\Draws;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class DashboardController extends Controller
 {
-    public function index(Request $request): JsonResponse
+    public function index(Request $request, SattaMatkaApi $api): JsonResponse
     {
         $user = $request->user();
         $bets = $user->bets()->latest()->get();
@@ -17,6 +18,10 @@ class DashboardController extends Controller
         $winsCount = $bets->where('status', 'won')->count();
         $balance = (float) $user->wallet_balance;
         $draws = Draws::open();
+        $recentResults = collect($api->toResultsPayload($api->board())['results'] ?? [])
+            ->take(5)
+            ->values()
+            ->all();
 
         return response()->json([
             'user' => [
@@ -74,22 +79,7 @@ class DashboardController extends Controller
                 'draw_at' => optional($bet->draw_at)?->toIso8601String(),
                 'created_at' => $bet->created_at?->toIso8601String(),
             ])->values(),
-            'recent_results' => [
-                [
-                    'id' => 101,
-                    'name' => 'Morning Draw',
-                    'drawn_at' => now()->subHours(6)->toIso8601String(),
-                    'numbers' => [7, 14, 22, 31, 45, 9],
-                    'prize' => '₹5,00,000',
-                ],
-                [
-                    'id' => 100,
-                    'name' => 'Night Special',
-                    'drawn_at' => now()->subDay()->toIso8601String(),
-                    'numbers' => [3, 11, 19, 28, 36, 42],
-                    'prize' => '₹1,00,000',
-                ],
-            ],
+            'recent_results' => $recentResults,
         ]);
     }
 }

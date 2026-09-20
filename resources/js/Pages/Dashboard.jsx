@@ -418,15 +418,22 @@ export default function Dashboard() {
                                                     )}
                                                 </p>
                                             </div>
-                                            <p className="text-xs font-medium text-gold">
-                                                {result.prize}
+                                            <p className="text-xs font-medium uppercase tracking-wide text-gold">
+                                                {result.status ||
+                                                    result.prize ||
+                                                    '—'}
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
-                                            {result.numbers?.map((n) => (
+                                            {(result.numbers?.length
+                                                ? result.numbers
+                                                : result.result_string
+                                                  ? [result.result_string]
+                                                  : []
+                                            ).map((n, index) => (
                                                 <span
-                                                    key={`${result.id}-${n}`}
-                                                    className="flex h-8 w-8 items-center justify-center rounded-full bg-gold text-xs font-semibold text-navy-dark"
+                                                    key={`${result.id}-${n}-${index}`}
+                                                    className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-gold px-2 text-xs font-semibold text-navy-dark"
                                                 >
                                                     {n}
                                                 </span>
@@ -434,6 +441,11 @@ export default function Dashboard() {
                                         </div>
                                     </li>
                                 ))}
+                                {!data?.recent_results?.length && (
+                                    <li className="text-sm text-app-muted">
+                                        No live results yet.
+                                    </li>
+                                )}
                             </ul>
                         )}
                     </section>

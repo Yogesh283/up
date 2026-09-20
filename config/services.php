@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    'sattamatka' => [
+        'base_url' => env('SMA_BASE_URL', 'https://sattamatkaapi.live'),
+        'api_key' => env('SMA_API_KEY'),
+        'verify' => env('SMA_VERIFY', 'sma-e8483846b9fbde11b3295259'),
+    ],
+
 ];
