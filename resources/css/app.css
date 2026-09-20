@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    --navy: #061b3a;
+    --navy-dark: #031229;
+    --card: #0b2852;
+    --blue: #123b70;
+
+    --gold: #ffd23f;
+    --gold-bright: #ffc107;
+    --gold-dark: #d99a00;
+
+    --white: #ffffff;
+    --text: #dce7f5;
+    --muted: #8fa8c7;
+
+    --success: #20c997;
+    --danger: #ff4d5a;
+}
+
+@layer base {
+    html {
+        -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+        @apply bg-navy-dark font-sans text-app-text antialiased;
+    }
+}
+
+@layer components {
+    .auth-glow {
+        background:
+            radial-gradient(ellipse 70% 50% at 20% 15%, rgba(255, 210, 63, 0.12), transparent 55%),
+            radial-gradient(ellipse 55% 45% at 85% 80%, rgba(18, 59, 112, 0.85), transparent 55%),
+            linear-gradient(160deg, var(--navy) 0%, var(--navy-dark) 55%, #020b18 100%);
+    }
+
+    .auth-grid {
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+        background-size: 48px 48px;
+        mask-image: radial-gradient(ellipse 70% 70% at 30% 40%, black, transparent);
+    }
+
+    .auth-field {
+        @apply w-full rounded-xl border border-white/10 bg-navy-dark/60 px-4 py-3.5 text-base text-app-text outline-none transition duration-200 placeholder:text-app-muted focus:border-gold focus:ring-2 focus:ring-gold/20 sm:py-3 sm:text-sm;
+    }
+
+    .auth-label {
+        @apply mb-1.5 block text-sm font-medium text-app-text;
+    }
+
+    .auth-btn {
+        @apply inline-flex w-full items-center justify-center rounded-xl bg-gold px-4 py-3.5 text-base font-semibold text-navy-dark transition duration-200 hover:bg-gold-bright focus:outline-none focus:ring-2 focus:ring-gold focus:ring-offset-2 focus:ring-offset-navy active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm;
+    }
+
+    .auth-link {
+        @apply font-medium text-gold transition hover:text-gold-bright;
+    }
+
+    .auth-phone-bar {
+        @apply flex overflow-hidden rounded-xl border border-white/10 bg-navy-dark/60 transition duration-200 focus-within:border-gold focus-within:ring-2 focus-within:ring-gold/20;
+    }
+
+    .auth-country-select {
+        @apply shrink-0 border-0 border-r border-white/10 bg-blue/40 py-3.5 pl-3 pr-8 text-base text-app-text outline-none sm:py-3 sm:text-sm;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%238FA8C7' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+        background-position: right 0.4rem center;
+        background-repeat: no-repeat;
+        background-size: 1.1rem 1.1rem;
+        appearance: none;
+    }
+
+    .auth-phone-input {
+        @apply min-w-0 flex-1 border-0 bg-transparent px-4 py-3.5 text-base text-app-text outline-none placeholder:text-app-muted sm:py-3 sm:text-sm;
+    }
+
+    .auth-compact .auth-label {
+        @apply mb-1 text-xs;
+    }
+
+    .auth-compact .auth-field {
+        @apply rounded-lg px-3 py-2.5 text-sm;
+    }
+
+    .auth-compact .auth-btn {
+        @apply rounded-lg py-2.5 text-sm;
+    }
+
+    .auth-compact .auth-phone-bar {
+        @apply rounded-lg;
+    }
+
+    .auth-compact .auth-country-select {
+        @apply py-2.5 pl-2.5 pr-7 text-sm;
+    }
+
+    .auth-compact .auth-phone-input {
+        @apply px-3 py-2.5 text-sm;
+    }
+
+    .app-card {
+        @apply rounded-2xl bg-card p-4 shadow-sm ring-1 ring-white/10 sm:p-5;
+    }
+
+    .app-page {
+        @apply mx-auto max-w-6xl px-4 py-6 pb-10 sm:px-6 sm:py-8 lg:px-8;
+    }
+
+    .dash-fade {
+        animation: auth-fade-up 0.55s ease-out both;
+    }
+
+    .auth-fade-in {
+        animation: auth-fade-in 0.6s ease-out both;
+    }
+
+    .auth-fade-up {
+        animation: auth-fade-up 0.7s ease-out 0.12s both;
+    }
+
+    .auth-panel {
+        animation: auth-fade-up 0.65s ease-out 0.08s both;
+    }
+
+    .auth-float {
+        animation: auth-float 5s ease-in-out infinite;
+    }
+}
+
+@keyframes auth-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes auth-fade-up {
+    from {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes auth-float {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}
