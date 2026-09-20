@@ -1,5 +1,6 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import BetCard from '@/Components/BetCard';
+import Modal from '@/Components/Modal';
 import { formatMoney } from '@/lib/format';
 import { Head, usePage } from '@inertiajs/react';
 import axios from 'axios';
@@ -29,6 +30,8 @@ function StatSkeleton() {
     );
 }
 
+let slipSeq = 1;
+
 export default function Dashboard() {
     const { auth } = usePage().props;
     const [data, setData] = useState(null);
@@ -39,9 +42,10 @@ export default function Dashboard() {
     const [marketSearch, setMarketSearch] = useState('');
     const [selectedDrawId, setSelectedDrawId] = useState(null);
     const [betType, setBetType] = useState('number');
-    const [selectedNumbers, setSelectedNumbers] = useState([]);
-    const [panaInput, setPanaInput] = useState('');
-    const [betAmount, setBetAmount] = useState('10');
+    const [numberInput, setNumberInput] = useState('');
+    const [betAmount, setBetAmount] = useState('');
+    const [slip, setSlip] = useState([]);
+    const [confirmOpen, setConfirmOpen] = useState(false);
     const [placing, setPlacing] = useState(false);
     const [betMessage, setBetMessage] = useState(null);
     const [betError, setBetError] = useState(null);
@@ -59,14 +63,7 @@ export default function Dashboard() {
                     if (prev && draws.some((d) => d.id === prev && d.board === board)) {
                         return prev;
                     }
-                    // Kalyan: user must pick a market manually
-                    if (board === 'matka') {
-                        return null;
-                    }
-                    const preferred =
-                        draws.find((d) => d.board === 'king' && d.status === 'open') ||
-                        draws.find((d) => d.board === 'king');
-                    return preferred?.id ?? null;
+                    return null;
                 });
             })
             .catch(() => {
@@ -83,6 +80,7 @@ export default function Dashboard() {
     const betting = data?.betting || {};
     const minAmount = betting.min_amount ?? 1;
     const maxAmount = betting.max_amount ?? 100000;
+    const wallet = data?.wallet_balance ?? 0;
 
     const boardDraws = useMemo(() => {
         const list = (data?.upcoming_draws || []).filter((d) => d.board === board);
@@ -98,7 +96,12 @@ export default function Dashboard() {
 
     const activeType = useMemo(() => {
         const types = selectedDraw?.bet_types || [];
-        return types.find((t) => t.id === betType) || types.find((t) => t.open) || types[0] || null;
+        return (
+            types.find((t) => t.id === betType) ||
+            types.find((t) => t.open) ||
+            types[0] ||
+            null
+        );
     }, [selectedDraw, betType]);
 
     const digits = activeType?.digits ?? 2;
@@ -106,13 +109,15 @@ export default function Dashboard() {
     const maxNumber = activeType?.max ?? 99;
     const multiplier = activeType?.multiplier ?? 9;
     const amountValue = Number(betAmount) || 0;
-    const potentialWin = amountValue > 0 ? amountValue * multiplier : 0;
-    const isPana = digits === 3;
 
-    const numberPool = useMemo(() => {
-        if (isPana) return [];
-        return Array.from({ length: maxNumber - minNumber + 1 }, (_, i) => minNumber + i);
-    }, [minNumber, maxNumber, isPana]);
+    const slipTotal = useMemo(
+        () => slip.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+        [slip],
+    );
+    const slipPotential = useMemo(
+        () => slip.reduce((sum, row) => sum + Number(row.potential_win || 0), 0),
+        [slip],
+    );
 
     useEffect(() => {
         if (!selectedDraw) return;
@@ -120,98 +125,155 @@ export default function Dashboard() {
             selectedDraw.bet_types?.find((t) => t.open) ||
             selectedDraw.bet_types?.[0];
         setBetType(openType?.id || (board === 'matka' ? 'jodi' : 'number'));
-        setSelectedNumbers([]);
-        setPanaInput('');
+        setNumberInput('');
+        setBetAmount('');
+        setBetError(null);
     }, [selectedDrawId, board]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const selectBoard = (next) => {
         setBoard(next);
         setMarketSearch('');
-        setSelectedNumbers([]);
-        setPanaInput('');
+        setSelectedDrawId(null);
+        setNumberInput('');
+        setBetAmount('');
         setBetError(null);
         setBetMessage(null);
-        if (next === 'matka') {
-            setSelectedDrawId(null);
-            return;
+    };
+
+    const parseNumberInput = () => {
+        const raw = String(numberInput || '').trim();
+        if (!/^\d+$/.test(raw)) {
+            return { error: `Number enter karo (${padN(minNumber, digits)}–${padN(maxNumber, digits)}).` };
         }
-        const first =
-            (data?.upcoming_draws || []).find((d) => d.board === next && d.status === 'open') ||
-            (data?.upcoming_draws || []).find((d) => d.board === next);
-        setSelectedDrawId(first?.id ?? null);
+        if (raw.length > digits) {
+            return { error: `Maximum ${digits} digit number dalo.` };
+        }
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n) || n < minNumber || n > maxNumber) {
+            return {
+                error: `Number ${padN(minNumber, digits)} se ${padN(maxNumber, digits)} ke beech hona chahiye.`,
+            };
+        }
+        return { number: n, display: padN(n, digits) };
     };
 
-    const toggleNumber = (n) => {
+    const addToSlip = () => {
         setBetMessage(null);
         setBetError(null);
-        setSelectedNumbers([n]);
-    };
 
-    const placeBet = async () => {
         if (!selectedDraw) {
-            setBetError('Please select a market.');
+            setBetError('Pehle market select karo.');
             return;
         }
         if (!activeType?.open) {
-            setBetError('This bet type is closed for now.');
+            setBetError('Is bet type pe betting band hai.');
             return;
         }
+
+        const parsed = parseNumberInput();
+        if (parsed.error) {
+            setBetError(parsed.error);
+            return;
+        }
+
         if (amountValue < minAmount || amountValue > maxAmount) {
             setBetError(
-                `Amount must be between ${formatMoney(minAmount)} and ${formatMoney(maxAmount)}.`,
+                `Amount ${formatMoney(minAmount)} se ${formatMoney(maxAmount)} ke beech dalo.`,
             );
             return;
         }
 
-        let numbers = selectedNumbers;
-        if (isPana) {
-            if (!/^\d{3}$/.test(panaInput)) {
-                setBetError('Enter a 3-digit pana (e.g. 257).');
-                return;
-            }
-            numbers = [parseInt(panaInput, 10)];
-        } else if (numbers.length !== 1) {
-            setBetError(`Select 1 number (${padN(minNumber, digits)}–${padN(maxNumber, digits)}).`);
+        const row = {
+            key: `slip-${slipSeq++}`,
+            draw_id: selectedDraw.id,
+            board: selectedDraw.board,
+            board_label: selectedDraw.board_label,
+            market_name: selectedDraw.name,
+            bet_type: activeType.id,
+            bet_type_label: activeType.label,
+            numbers: [parsed.number],
+            number_display: parsed.display,
+            amount: amountValue,
+            multiplier,
+            potential_win: amountValue * multiplier,
+        };
+
+        setSlip((prev) => [...prev, row]);
+        setNumberInput('');
+        setBetAmount('');
+        setBetMessage('Slip me add ho gaya. Aur bets add kar sakte ho, phir Confirm.');
+    };
+
+    const removeFromSlip = (key) => {
+        setSlip((prev) => prev.filter((row) => row.key !== key));
+    };
+
+    const openConfirm = () => {
+        setBetError(null);
+        if (slip.length === 0) {
+            setBetError('Pehle kam se kam 1 bet slip me add karo.');
             return;
         }
+        if (slipTotal > wallet) {
+            setBetError(
+                `Wallet me sirf ${formatMoney(wallet)} hai, slip total ${formatMoney(slipTotal)} hai. Deposit karo ya bets kam karo.`,
+            );
+            return;
+        }
+        setConfirmOpen(true);
+    };
+
+    const confirmPlaceAll = async () => {
+        if (slip.length === 0) return;
 
         setPlacing(true);
         setBetError(null);
         setBetMessage(null);
 
-        try {
-            const response = await axios.post(route('api.bets.store'), {
-                draw_id: selectedDraw.id,
-                board: selectedDraw.board,
-                bet_type: activeType.id,
-                numbers,
-                amount: amountValue,
-            });
+        let ok = 0;
+        let fail = 0;
+        const remaining = [];
+
+        for (const row of slip) {
+            try {
+                await axios.post(route('api.bets.store'), {
+                    draw_id: row.draw_id,
+                    board: row.board,
+                    bet_type: row.bet_type,
+                    numbers: row.numbers,
+                    amount: row.amount,
+                });
+                ok += 1;
+            } catch (err) {
+                fail += 1;
+                remaining.push(row);
+                const errors = err.response?.data?.errors;
+                setBetError(
+                    errors?.amount?.[0] ||
+                        errors?.numbers?.[0] ||
+                        err.response?.data?.message ||
+                        'Kuch bets fail ho gayi.',
+                );
+            }
+        }
+
+        setSlip(remaining);
+        setConfirmOpen(false);
+        setPlacing(false);
+        await loadDashboard();
+
+        if (ok > 0) {
             setBetMessage(
-                `${response.data.message} Potential win ${formatMoney(response.data.bet.potential_win)}.`,
+                fail > 0
+                    ? `${ok} bet place hui, ${fail} fail. Fail wali slip me reh gayi.`
+                    : `${ok} bet confirm ho gayi — Running bets me dekho.`,
             );
-            setSelectedNumbers([]);
-            setPanaInput('');
-            await loadDashboard();
             window.setTimeout(() => {
                 betsSectionRef.current?.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start',
                 });
             }, 150);
-        } catch (err) {
-            const errors = err.response?.data?.errors;
-            setBetError(
-                errors?.numbers?.[0] ||
-                    errors?.amount?.[0] ||
-                    errors?.draw_id?.[0] ||
-                    errors?.bet_type?.[0] ||
-                    errors?.board?.[0] ||
-                    err.response?.data?.message ||
-                    'Could not place bet. Try again.',
-            );
-        } finally {
-            setPlacing(false);
         }
     };
 
@@ -228,9 +290,7 @@ export default function Dashboard() {
                         Hi, {auth.user?.name?.split(' ')[0] || 'Player'}
                     </h1>
                     <p className="mt-1 text-sm text-app-muted">
-                        {board === 'matka'
-                            ? 'Kalyan Matka: pehle market select karo, phir bet form khulega.'
-                            : 'Satta King: amount choose karo, number lagao — 1₹ = 9₹.'}
+                        Number → amount → Add bet → last me Confirm (popup).
                     </p>
                 </div>
 
@@ -269,25 +329,13 @@ export default function Dashboard() {
                 </section>
 
                 <section className="dash-fade mb-6 rounded-2xl bg-card p-5 shadow-sm ring-1 ring-gold/20 sm:p-6">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                            <h2 className="font-display text-lg font-semibold text-gold">
-                                Place a bet
-                            </h2>
-                            <p className="mt-0.5 text-xs text-app-muted">
-                                {board === 'matka'
-                                    ? 'Market select → bet type → amount → number'
-                                    : 'Market → amount → number (00–99)'}
-                            </p>
-                        </div>
-                        {selectedDraw && (
-                            <p className="text-sm text-app-text">
-                                Win {multiplier}×:{' '}
-                                <span className="font-semibold text-gold">
-                                    {potentialWin ? formatMoney(potentialWin) : '—'}
-                                </span>
-                            </p>
-                        )}
+                    <div className="mb-4">
+                        <h2 className="font-display text-lg font-semibold text-gold">
+                            Place bets
+                        </h2>
+                        <p className="mt-0.5 text-xs text-app-muted">
+                            Market select → number type karo → amount → Add · last me Confirm
+                        </p>
                     </div>
 
                     <div className="mb-4 flex gap-2">
@@ -334,8 +382,6 @@ export default function Dashboard() {
                                     disabled={closed}
                                     onClick={() => {
                                         setSelectedDrawId(draw.id);
-                                        setSelectedNumbers([]);
-                                        setPanaInput('');
                                         setBetError(null);
                                         setBetMessage(null);
                                     }}
@@ -350,16 +396,6 @@ export default function Dashboard() {
                                     <div className="min-w-0">
                                         <p className="truncate text-sm font-semibold text-white">
                                             {draw.name}
-                                            {draw.is_due && (
-                                                <span className="ms-2 text-[10px] font-bold text-danger">
-                                                    DUE
-                                                </span>
-                                            )}
-                                            {draw.is_next_up && !draw.is_due && (
-                                                <span className="ms-2 text-[10px] font-bold text-gold">
-                                                    NEXT
-                                                </span>
-                                            )}
                                         </p>
                                         <p className="mt-0.5 text-xs text-app-muted">
                                             {draw.time_label || formatDrawTime(draw.draw_at)} ·{' '}
@@ -380,27 +416,21 @@ export default function Dashboard() {
                         })}
                         {!loading && boardDraws.length === 0 && (
                             <p className="py-4 text-center text-sm text-app-muted">
-                                {marketSearch
-                                    ? 'No market matched.'
-                                    : 'No live markets right now.'}
+                                No live markets right now.
                             </p>
                         )}
                     </div>
 
-                    {!selectedDraw && (
+                    {!selectedDraw ? (
                         <div className="rounded-xl border border-dashed border-white/15 bg-navy-dark/30 px-4 py-6 text-center">
                             <p className="text-sm font-medium text-white">
-                                {board === 'matka'
-                                    ? 'Upar se koi ek Kalyan Matka market select karo'
-                                    : 'Market select karo bet lagane ke liye'}
+                                Pehle market select karo
                             </p>
                             <p className="mt-1 text-xs text-app-muted">
-                                Select ke baad amount aur number inputs yahan dikhenge.
+                                Uske baad number aur amount input dikhega.
                             </p>
                         </div>
-                    )}
-
-                    {selectedDraw && (
+                    ) : (
                         <>
                             <div className="mb-4 rounded-xl border border-gold/20 bg-gold/5 px-4 py-3">
                                 <p className="text-xs text-app-muted">Selected market</p>
@@ -409,41 +439,10 @@ export default function Dashboard() {
                                 </p>
                             </div>
 
-                            <div className="mb-4">
-                                <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
-                                    Your amount (₹)
-                                </label>
-                                <div className="flex flex-wrap gap-2">
-                                    {[10, 20, 50, 100, 500].map((preset) => (
-                                        <button
-                                            key={preset}
-                                            type="button"
-                                            onClick={() => setBetAmount(String(preset))}
-                                            className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                                                Number(betAmount) === preset
-                                                    ? 'bg-gold text-navy-dark'
-                                                    : 'bg-navy-dark text-app-muted ring-1 ring-white/10'
-                                            }`}
-                                        >
-                                            ₹{preset}
-                                        </button>
-                                    ))}
-                                    <input
-                                        type="number"
-                                        min={minAmount}
-                                        max={maxAmount}
-                                        step="1"
-                                        value={betAmount}
-                                        onChange={(e) => setBetAmount(e.target.value)}
-                                        className="w-28 rounded-xl border border-white/10 bg-navy-dark/50 px-3 py-1.5 text-sm text-white focus:border-gold/40 focus:outline-none"
-                                    />
-                                </div>
-                            </div>
-
                             {board === 'matka' && selectedDraw.bet_types?.length > 0 && (
                                 <div className="mb-4">
                                     <p className="mb-2 text-xs font-medium uppercase tracking-wide text-app-muted">
-                                        Matka bet type
+                                        Bet type
                                     </p>
                                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                                         {selectedDraw.bet_types.map((t) => (
@@ -453,8 +452,7 @@ export default function Dashboard() {
                                                 disabled={!t.open}
                                                 onClick={() => {
                                                     setBetType(t.id);
-                                                    setSelectedNumbers([]);
-                                                    setPanaInput('');
+                                                    setNumberInput('');
                                                 }}
                                                 className={`rounded-xl border px-3 py-2 text-left text-xs transition ${
                                                     betType === t.id
@@ -474,84 +472,148 @@ export default function Dashboard() {
                                 </div>
                             )}
 
-                            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                                <p className="text-xs font-medium uppercase tracking-wide text-app-muted">
-                                    {isPana
-                                        ? 'Enter pana (3 digits)'
-                                        : `Pick number (${padN(minNumber, digits)}–${padN(maxNumber, digits)})`}
-                                </p>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setSelectedNumbers([]);
-                                        setPanaInput('');
-                                    }}
-                                    className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-app-muted"
-                                >
-                                    Clear
-                                </button>
+                            <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                                <label className="block">
+                                    <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
+                                        Number ({padN(minNumber, digits)}–
+                                        {padN(maxNumber, digits)})
+                                    </span>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={digits}
+                                        value={numberInput}
+                                        onChange={(e) =>
+                                            setNumberInput(
+                                                e.target.value.replace(/\D/g, '').slice(0, digits),
+                                            )
+                                        }
+                                        placeholder={
+                                            digits === 1
+                                                ? 'e.g. 7'
+                                                : digits === 3
+                                                  ? 'e.g. 257'
+                                                  : 'e.g. 45'
+                                        }
+                                        className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-3 text-center text-2xl font-bold tracking-[0.25em] text-gold focus:border-gold/40 focus:outline-none"
+                                    />
+                                </label>
+                                <label className="block">
+                                    <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
+                                        Amount (₹)
+                                    </span>
+                                    <input
+                                        type="number"
+                                        min={minAmount}
+                                        max={maxAmount}
+                                        step="1"
+                                        value={betAmount}
+                                        onChange={(e) => setBetAmount(e.target.value)}
+                                        placeholder="e.g. 50"
+                                        className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-3 text-center text-2xl font-bold text-white focus:border-gold/40 focus:outline-none"
+                                    />
+                                    <p className="mt-1 text-[11px] text-app-muted">
+                                        Win rate {multiplier}× · if win{' '}
+                                        {amountValue
+                                            ? formatMoney(amountValue * multiplier)
+                                            : '—'}
+                                    </p>
+                                </label>
                             </div>
-
-                            {isPana ? (
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    maxLength={3}
-                                    value={panaInput}
-                                    onChange={(e) =>
-                                        setPanaInput(
-                                            e.target.value.replace(/\D/g, '').slice(0, 3),
-                                        )
-                                    }
-                                    placeholder="e.g. 257"
-                                    className="mb-4 w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-3 text-center text-2xl font-bold tracking-[0.3em] text-gold focus:border-gold/40 focus:outline-none"
-                                />
-                            ) : (
-                                <div
-                                    className={`mb-4 grid gap-1.5 ${
-                                        digits === 1
-                                            ? 'grid-cols-5 sm:grid-cols-10'
-                                            : 'grid-cols-10'
-                                    }`}
-                                >
-                                    {numberPool.map((n) => {
-                                        const active = selectedNumbers.includes(n);
-                                        return (
-                                            <button
-                                                key={n}
-                                                type="button"
-                                                onClick={() => toggleNumber(n)}
-                                                className={`flex h-9 items-center justify-center rounded-lg text-xs font-semibold transition sm:h-10 sm:text-sm ${
-                                                    active
-                                                        ? 'bg-gold text-navy-dark'
-                                                        : 'bg-navy-dark text-app-text hover:bg-blue'
-                                                }`}
-                                            >
-                                                {padN(n, digits)}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
 
                             <button
                                 type="button"
-                                onClick={placeBet}
-                                disabled={
-                                    placing ||
-                                    loading ||
-                                    !selectedDraw ||
-                                    !activeType?.open ||
-                                    amountValue < minAmount
-                                }
-                                className="auth-btn"
+                                onClick={addToSlip}
+                                disabled={!activeType?.open}
+                                className="auth-btn mb-4"
                             >
-                                {placing
-                                    ? 'Placing bet…'
-                                    : `Place bet · ${formatMoney(amountValue || 0)} → win ${formatMoney(potentialWin || 0)}`}
+                                Add bet to slip
                             </button>
                         </>
                     )}
+
+                    <div className="rounded-xl border border-white/10 bg-navy-dark/40 p-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <p className="text-sm font-semibold text-white">
+                                    Bet slip ({slip.length})
+                                </p>
+                                <p className="text-xs text-app-muted">
+                                    Add karte raho · last me Confirm
+                                </p>
+                            </div>
+                            {slip.length > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSlip([])}
+                                    className="text-xs text-app-muted hover:text-white"
+                                >
+                                    Clear slip
+                                </button>
+                            )}
+                        </div>
+
+                        {slip.length === 0 ? (
+                            <p className="py-4 text-center text-sm text-app-muted">
+                                Slip khali hai. Number + amount daal ke Add bet dabao.
+                            </p>
+                        ) : (
+                            <ul className="mb-4 max-h-56 space-y-2 overflow-y-auto">
+                                {slip.map((row) => (
+                                    <li
+                                        key={row.key}
+                                        className="flex items-start justify-between gap-3 rounded-lg border border-white/10 bg-card/60 px-3 py-2"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="truncate text-sm font-semibold text-white">
+                                                {row.market_name}
+                                            </p>
+                                            <p className="text-xs text-app-muted">
+                                                {row.board_label} · {row.bet_type_label} · No.{' '}
+                                                <span className="font-semibold text-gold">
+                                                    {row.number_display}
+                                                </span>{' '}
+                                                · {formatMoney(row.amount)} →{' '}
+                                                {formatMoney(row.potential_win)}
+                                            </p>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeFromSlip(row.key)}
+                                            className="shrink-0 text-xs text-danger hover:underline"
+                                        >
+                                            Remove
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                            <span className="text-app-muted">
+                                Total stake:{' '}
+                                <span className="font-semibold text-white">
+                                    {formatMoney(slipTotal)}
+                                </span>
+                            </span>
+                            <span className="text-app-muted">
+                                If all win:{' '}
+                                <span className="font-semibold text-gold">
+                                    {formatMoney(slipPotential)}
+                                </span>
+                            </span>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={openConfirm}
+                            disabled={slip.length === 0 || placing}
+                            className="auth-btn"
+                        >
+                            Confirm {slip.length || ''} bet
+                            {slip.length === 1 ? '' : 's'}
+                        </button>
+                    </div>
                 </section>
 
                 <div ref={betsSectionRef} className="space-y-6">
@@ -562,8 +624,7 @@ export default function Dashboard() {
                                     Running bets
                                 </h2>
                                 <p className="mt-0.5 text-xs text-app-muted">
-                                    Abhi chal rahi bets — result aate hi yahan Won/Lost
-                                    ban jayegi
+                                    Confirm ke baad yahan dikhengi
                                 </p>
                             </div>
                             <span className="rounded-full bg-gold/15 px-3 py-1 text-xs font-semibold text-gold">
@@ -588,8 +649,7 @@ export default function Dashboard() {
                             </ul>
                         ) : (
                             <p className="mt-4 rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-app-muted">
-                                Koi running bet nahi. Upar se market select karke bet
-                                lagao — yahan dikhegi.
+                                Abhi koi running bet nahi.
                             </p>
                         )}
                     </section>
@@ -601,7 +661,7 @@ export default function Dashboard() {
                                     Recent bets
                                 </h2>
                                 <p className="mt-0.5 text-xs text-app-muted">
-                                    Settle ho chuki bets — Won / Lost / Refund
+                                    Won / Lost / Refund
                                 </p>
                             </div>
                             <a
@@ -629,13 +689,91 @@ export default function Dashboard() {
                             </ul>
                         ) : (
                             <p className="mt-4 text-sm text-app-muted">
-                                Abhi koi settled bet nahi. Result aane ke baad yahan
-                                dikhega.
+                                Abhi koi settled bet nahi.
                             </p>
                         )}
                     </section>
                 </div>
             </div>
+
+            <Modal
+                show={confirmOpen}
+                onClose={() => !placing && setConfirmOpen(false)}
+                maxWidth="lg"
+            >
+                <div className="bg-navy-dark p-5 text-white sm:p-6">
+                    <h3 className="font-display text-xl font-semibold text-gold">
+                        Confirm bets
+                    </h3>
+                    <p className="mt-1 text-sm text-app-muted">
+                        Check karo — kis market pe kitna lagaya hai
+                    </p>
+
+                    <ul className="mt-4 max-h-64 space-y-2 overflow-y-auto">
+                        {slip.map((row) => (
+                            <li
+                                key={row.key}
+                                className="rounded-xl border border-white/10 bg-card/80 px-3 py-2"
+                            >
+                                <p className="text-sm font-semibold text-white">
+                                    {row.market_name}
+                                </p>
+                                <p className="mt-0.5 text-xs text-app-muted">
+                                    {row.board_label} · {row.bet_type_label}
+                                </p>
+                                <div className="mt-2 flex flex-wrap gap-3 text-sm">
+                                    <span>
+                                        No.{' '}
+                                        <strong className="text-gold">
+                                            {row.number_display}
+                                        </strong>
+                                    </span>
+                                    <span>
+                                        Amount{' '}
+                                        <strong>{formatMoney(row.amount)}</strong>
+                                    </span>
+                                    <span>
+                                        If win{' '}
+                                        <strong className="text-gold">
+                                            {formatMoney(row.potential_win)}
+                                        </strong>
+                                    </span>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+
+                    <div className="mt-4 flex flex-wrap justify-between gap-2 border-t border-white/10 pt-3 text-sm">
+                        <span>
+                            Total: <strong>{formatMoney(slipTotal)}</strong>
+                        </span>
+                        <span>
+                            Wallet: <strong>{formatMoney(wallet)}</strong>
+                        </span>
+                    </div>
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                        <button
+                            type="button"
+                            disabled={placing}
+                            onClick={() => setConfirmOpen(false)}
+                            className="rounded-xl bg-white/10 px-4 py-2.5 text-sm font-semibold text-white"
+                        >
+                            Back
+                        </button>
+                        <button
+                            type="button"
+                            disabled={placing}
+                            onClick={confirmPlaceAll}
+                            className="auth-btn flex-1"
+                        >
+                            {placing
+                                ? 'Placing…'
+                                : `Confirm & place · ${formatMoney(slipTotal)}`}
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </AuthenticatedLayout>
     );
 }
