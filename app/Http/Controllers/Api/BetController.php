@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Bet;
 use App\Services\CombinedResultsService;
+use App\Support\BetPresenter;
 use App\Support\Draws;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -107,25 +108,10 @@ class BetController extends Controller
         });
 
         $user->refresh();
-        $digits = (int) ($typeCfg['digits'] ?? 2);
 
         return response()->json([
             'message' => 'Bet placed successfully.',
-            'bet' => [
-                'id' => $bet->id,
-                'draw_name' => $bet->draw_name,
-                'board' => $bet->board,
-                'bet_type' => $bet->bet_type,
-                'numbers' => $bet->numbers,
-                'numbers_display' => collect($bet->numbers)
-                    ->map(fn ($n) => str_pad((string) $n, $digits, '0', STR_PAD_LEFT))
-                    ->all(),
-                'amount' => (float) $bet->amount,
-                'potential_win' => round((float) $bet->amount * $multiplier, 2),
-                'status' => $bet->status,
-                'draw_at' => optional($bet->draw_at)?->toIso8601String(),
-                'created_at' => $bet->created_at?->toIso8601String(),
-            ],
+            'bet' => BetPresenter::toArray($bet),
             'wallet_balance' => (float) $user->wallet_balance,
         ], 201);
     }

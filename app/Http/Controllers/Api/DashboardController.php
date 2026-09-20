@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\CombinedResultsService;
+use App\Support\BetPresenter;
 use App\Support\Draws;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,8 @@ class DashboardController extends Controller
     {
         $user = $request->user();
         $bets = $user->bets()->latest()->get();
-        $pendingCount = $bets->where('status', 'pending')->count();
+        $pending = $bets->where('status', 'pending')->values();
+        $settled = $bets->whereIn('status', ['won', 'lost', 'refunded'])->values();
         $winsCount = $bets->where('status', 'won')->count();
         $balance = (float) $user->wallet_balance;
 
@@ -33,13 +35,6 @@ class DashboardController extends Controller
             ->values()
             ->all();
 
-        if ($recentResults === []) {
-            $recentResults = collect($resultsPayload['results'] ?? [])
-                ->take(8)
-                ->values()
-                ->all();
-        }
-
         return response()->json([
             'user' => [
                 'name' => $user->name,
@@ -51,7 +46,6 @@ class DashboardController extends Controller
                 'max_amount' => (float) config('betting.max_amount', 100000),
                 'king' => config('betting.king'),
                 'matka_types' => config('betting.matka.types'),
-                // legacy
                 'ticket_price' => (float) config('betting.ticket_price', 1),
                 'prize_multiplier' => (float) config('betting.king.multiplier', 9),
                 'pick_count' => 1,
@@ -61,31 +55,31 @@ class DashboardController extends Controller
             'stats' => [
                 [
                     'key' => 'balance',
-                    'label' => 'Wallet Balance',
+                    'label' => 'Wallet',
                     'value' => $balance,
                     'display' => '₹'.number_format($balance, 0),
-                    'hint' => 'Available to play',
+                    'hint' => 'Available',
                 ],
                 [
-                    'key' => 'tickets',
-                    'label' => 'Active Bets',
-                    'value' => $pendingCount,
-                    'display' => (string) $pendingCount,
-                    'hint' => 'Pending draws',
+                    'key' => 'active',
+                    'label' => 'Running bets',
+                    'value' => $pending->count(),
+                    'display' => (string) $pending->count(),
+                    'hint' => 'Result wait',
                 ],
                 [
                     'key' => 'wins',
-                    'label' => 'Total Wins',
+                    'label' => 'Wins',
                     'value' => $winsCount,
                     'display' => (string) $winsCount,
                     'hint' => 'All time',
                 ],
                 [
                     'key' => 'draws',
-                    'label' => 'Open Markets',
+                    'label' => 'Open markets',
                     'value' => $openDraws->count(),
                     'display' => (string) $openDraws->count(),
-                    'hint' => 'King + Matka',
+                    'hint' => 'Ready to bet',
                 ],
             ],
             'upcoming_draws' => collect($draws)->map(fn ($draw) => [
@@ -111,30 +105,10 @@ class DashboardController extends Controller
                 'is_due' => $draw['is_due'] ?? false,
                 'is_next_up' => $draw['is_next_up'] ?? false,
             ])->values(),
-            'my_bets' => $bets->take(8)->map(function ($bet) {
-                $digits = match ($bet->bet_type) {
-                    'single_open', 'single_close' => 1,
-                    'pana_open', 'pana_close' => 3,
-                    default => 2,
-                };
-
-                return [
-                    'id' => $bet->id,
-                    'draw_name' => $bet->draw_name,
-                    'board' => $bet->board,
-                    'bet_type' => $bet->bet_type,
-                    'numbers' => $bet->numbers,
-                    'numbers_display' => collect($bet->numbers ?? [])
-                        ->map(fn ($n) => str_pad((string) $n, $digits, '0', STR_PAD_LEFT))
-                        ->all(),
-                    'amount' => (float) $bet->amount,
-                    'prize' => (float) $bet->prize,
-                    'result_value' => $bet->result_value,
-                    'status' => $bet->status,
-                    'draw_at' => optional($bet->draw_at)?->toIso8601String(),
-                    'created_at' => $bet->created_at?->toIso8601String(),
-                ];
-            })->values(),
+            'active_bets' => $pending->map(fn ($bet) => BetPresenter::toArray($bet))->values(),
+            'recent_bets' => $settled->take(10)->map(fn ($bet) => BetPresenter::toArray($bet))->values(),
+            // legacy key for older UI
+            'my_bets' => $bets->take(12)->map(fn ($bet) => BetPresenter::toArray($bet))->values(),
             'recent_results' => $recentResults,
         ]);
     }

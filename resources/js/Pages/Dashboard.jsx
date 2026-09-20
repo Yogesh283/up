@@ -1,9 +1,9 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import StatusBadge from '@/Components/StatusBadge';
-import { formatDateTime, formatMoney } from '@/lib/format';
+import BetCard from '@/Components/BetCard';
+import { formatMoney } from '@/lib/format';
 import { Head, usePage } from '@inertiajs/react';
 import axios from 'axios';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 function formatDrawTime(iso) {
     if (!iso) return '—';
@@ -45,6 +45,7 @@ export default function Dashboard() {
     const [placing, setPlacing] = useState(false);
     const [betMessage, setBetMessage] = useState(null);
     const [betError, setBetError] = useState(null);
+    const betsSectionRef = useRef(null);
 
     const loadDashboard = () => {
         setLoading(true);
@@ -192,6 +193,12 @@ export default function Dashboard() {
             setSelectedNumbers([]);
             setPanaInput('');
             await loadDashboard();
+            window.setTimeout(() => {
+                betsSectionRef.current?.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start',
+                });
+            }, 150);
         } catch (err) {
             const errors = err.response?.data?.errors;
             setBetError(
@@ -547,110 +554,84 @@ export default function Dashboard() {
                     )}
                 </section>
 
-                <div className="grid gap-6 lg:grid-cols-2">
-                    <section className="dash-fade rounded-2xl bg-card p-5 shadow-sm ring-1 ring-white/10 sm:p-6">
-                        <h2 className="mb-4 font-display text-lg font-semibold text-gold">
-                            My recent bets
-                        </h2>
+                <div ref={betsSectionRef} className="space-y-6">
+                    <section className="dash-fade rounded-2xl bg-card p-5 shadow-sm ring-1 ring-gold/25 sm:p-6">
+                        <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
+                            <div>
+                                <h2 className="font-display text-lg font-semibold text-gold">
+                                    Running bets
+                                </h2>
+                                <p className="mt-0.5 text-xs text-app-muted">
+                                    Abhi chal rahi bets — result aate hi yahan Won/Lost
+                                    ban jayegi
+                                </p>
+                            </div>
+                            <span className="rounded-full bg-gold/15 px-3 py-1 text-xs font-semibold text-gold">
+                                {(data?.active_bets || []).length} active
+                            </span>
+                        </div>
+
                         {loading ? (
-                            <div className="space-y-3">
+                            <div className="mt-4 space-y-3">
                                 {[1, 2].map((i) => (
                                     <div
                                         key={i}
-                                        className="h-20 animate-pulse rounded-xl bg-navy-dark"
+                                        className="h-28 animate-pulse rounded-xl bg-navy-dark"
                                     />
                                 ))}
                             </div>
-                        ) : (
-                            <ul className="space-y-3">
-                                {data?.my_bets?.map((bet) => (
-                                    <li
-                                        key={bet.id}
-                                        className="rounded-xl border border-white/10 bg-blue/30 px-4 py-3"
-                                    >
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div>
-                                                <p className="text-sm font-semibold text-white">
-                                                    {bet.draw_name}
-                                                </p>
-                                                <p className="mt-0.5 text-xs text-app-muted">
-                                                    {formatDateTime(bet.created_at)} ·{' '}
-                                                    {formatMoney(bet.amount)}
-                                                    {bet.status === 'won' && bet.prize > 0 && (
-                                                        <> · Won {formatMoney(bet.prize)}</>
-                                                    )}
-                                                    {bet.result_value && (
-                                                        <> · Result {bet.result_value}</>
-                                                    )}
-                                                </p>
-                                            </div>
-                                            <StatusBadge status={bet.status} />
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {(bet.numbers_display || bet.numbers || []).map(
-                                                (n) => (
-                                                    <span
-                                                        key={`${bet.id}-${n}`}
-                                                        className="flex h-7 min-w-7 items-center justify-center rounded-full bg-gold px-1.5 text-[11px] font-semibold text-navy-dark"
-                                                    >
-                                                        {n}
-                                                    </span>
-                                                ),
-                                            )}
-                                        </div>
-                                    </li>
+                        ) : (data?.active_bets || []).length ? (
+                            <ul className="mt-4 space-y-3">
+                                {data.active_bets.map((bet) => (
+                                    <BetCard key={bet.id} bet={bet} />
                                 ))}
-                                {!data?.my_bets?.length && (
-                                    <p className="text-sm text-app-muted">
-                                        No bets yet. Place your first bet above.
-                                    </p>
-                                )}
                             </ul>
+                        ) : (
+                            <p className="mt-4 rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-sm text-app-muted">
+                                Koi running bet nahi. Upar se market select karke bet
+                                lagao — yahan dikhegi.
+                            </p>
                         )}
                     </section>
 
                     <section className="dash-fade rounded-2xl bg-card p-5 shadow-sm ring-1 ring-white/10 sm:p-6">
-                        <h2 className="mb-4 font-display text-lg font-semibold text-gold">
-                            Due / next results
-                        </h2>
+                        <div className="mb-1 flex flex-wrap items-end justify-between gap-2">
+                            <div>
+                                <h2 className="font-display text-lg font-semibold text-gold">
+                                    Recent bets
+                                </h2>
+                                <p className="mt-0.5 text-xs text-app-muted">
+                                    Settle ho chuki bets — Won / Lost / Refund
+                                </p>
+                            </div>
+                            <a
+                                href="/history"
+                                className="text-xs font-semibold text-gold hover:underline"
+                            >
+                                Full history →
+                            </a>
+                        </div>
+
                         {loading ? (
-                            <div className="space-y-3">
+                            <div className="mt-4 space-y-3">
                                 {[1, 2].map((i) => (
                                     <div
                                         key={i}
-                                        className="h-24 animate-pulse rounded-xl bg-navy-dark"
+                                        className="h-28 animate-pulse rounded-xl bg-navy-dark"
                                     />
                                 ))}
                             </div>
-                        ) : (
-                            <ul className="space-y-4">
-                                {data?.recent_results?.map((result) => (
-                                    <li key={result.id}>
-                                        <div className="mb-2 flex items-center justify-between gap-2">
-                                            <div>
-                                                <p className="text-sm font-semibold text-white">
-                                                    {result.name}
-                                                </p>
-                                                <p className="text-xs text-app-muted">
-                                                    {result.close_time ||
-                                                        result.open_time ||
-                                                        formatDrawTime(result.drawn_at)}
-                                                    {result.is_due && ' · DUE'}
-                                                    {result.is_next_up && !result.is_due && ' · NEXT'}
-                                                </p>
-                                            </div>
-                                            <p className="text-xs font-medium uppercase tracking-wide text-gold">
-                                                {result.status_label || result.status || '—'}
-                                            </p>
-                                        </div>
-                                    </li>
+                        ) : (data?.recent_bets || []).length ? (
+                            <ul className="mt-4 space-y-3">
+                                {data.recent_bets.map((bet) => (
+                                    <BetCard key={bet.id} bet={bet} />
                                 ))}
-                                {!data?.recent_results?.length && (
-                                    <li className="text-sm text-app-muted">
-                                        No due markets right now.
-                                    </li>
-                                )}
                             </ul>
+                        ) : (
+                            <p className="mt-4 text-sm text-app-muted">
+                                Abhi koi settled bet nahi. Result aane ke baad yahan
+                                dikhega.
+                            </p>
                         )}
                     </section>
                 </div>
