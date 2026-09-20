@@ -15,8 +15,8 @@ function formatDrawTime(iso) {
     });
 }
 
-function pad2(n) {
-    return String(n).padStart(2, '0');
+function padN(n, digits) {
+    return String(n).padStart(digits, '0');
 }
 
 function StatSkeleton() {
@@ -38,8 +38,10 @@ export default function Dashboard() {
     const [board, setBoard] = useState('king');
     const [marketSearch, setMarketSearch] = useState('');
     const [selectedDrawId, setSelectedDrawId] = useState(null);
+    const [betType, setBetType] = useState('number');
     const [selectedNumbers, setSelectedNumbers] = useState([]);
-    const [betAmount, setBetAmount] = useState('');
+    const [panaInput, setPanaInput] = useState('');
+    const [betAmount, setBetAmount] = useState('10');
     const [placing, setPlacing] = useState(false);
     const [betMessage, setBetMessage] = useState(null);
     const [betError, setBetError] = useState(null);
@@ -51,15 +53,9 @@ export default function Dashboard() {
             .then((response) => {
                 setData(response.data);
                 setError(null);
-
                 const draws = response.data.upcoming_draws || [];
-                const ticket = response.data.betting?.ticket_price ?? 10;
-                setBetAmount((prev) => (prev === '' ? String(ticket) : prev));
-
                 setSelectedDrawId((prev) => {
-                    if (prev && draws.some((d) => d.id === prev)) {
-                        return prev;
-                    }
+                    if (prev && draws.some((d) => d.id === prev)) return prev;
                     const preferred =
                         draws.find((d) => d.board === board && d.status === 'open') ||
                         draws.find((d) => d.status === 'open') ||
@@ -70,9 +66,7 @@ export default function Dashboard() {
             .catch(() => {
                 setError('Could not load dashboard data. Try again.');
             })
-            .finally(() => {
-                setLoading(false);
-            });
+            .finally(() => setLoading(false));
     };
 
     useEffect(() => {
@@ -81,13 +75,8 @@ export default function Dashboard() {
     }, []);
 
     const betting = data?.betting || {};
-    const pickCount = betting.pick_count || 1;
-    const minNumber = betting.min_number ?? 0;
-    const maxNumber = betting.max_number ?? 99;
-    const defaultTicket = betting.ticket_price ?? 10;
-    const minAmount = betting.min_amount ?? defaultTicket;
-    const maxAmount = betting.max_amount ?? 10000;
-    const prizeMultiplier = betting.prize_multiplier ?? 9;
+    const minAmount = betting.min_amount ?? 1;
+    const maxAmount = betting.max_amount ?? 100000;
 
     const boardDraws = useMemo(() => {
         const list = (data?.upcoming_draws || []).filter((d) => d.board === board);
@@ -97,33 +86,47 @@ export default function Dashboard() {
     }, [data, board, marketSearch]);
 
     const selectedDraw = useMemo(
-        () =>
-            data?.upcoming_draws?.find((d) => d.id === selectedDrawId) || null,
+        () => data?.upcoming_draws?.find((d) => d.id === selectedDrawId) || null,
         [data, selectedDrawId],
     );
 
-    const amountValue = Number(betAmount) || 0;
-    const potentialWin = amountValue > 0 ? amountValue * prizeMultiplier : 0;
+    const activeType = useMemo(() => {
+        const types = selectedDraw?.bet_types || [];
+        return types.find((t) => t.id === betType) || types.find((t) => t.open) || types[0] || null;
+    }, [selectedDraw, betType]);
 
-    const numberPool = useMemo(
-        () =>
-            Array.from(
-                { length: maxNumber - minNumber + 1 },
-                (_, i) => minNumber + i,
-            ),
-        [minNumber, maxNumber],
-    );
+    const digits = activeType?.digits ?? 2;
+    const minNumber = activeType?.min ?? 0;
+    const maxNumber = activeType?.max ?? 99;
+    const multiplier = activeType?.multiplier ?? 9;
+    const amountValue = Number(betAmount) || 0;
+    const potentialWin = amountValue > 0 ? amountValue * multiplier : 0;
+    const isPana = digits === 3;
+
+    const numberPool = useMemo(() => {
+        if (isPana) return [];
+        return Array.from({ length: maxNumber - minNumber + 1 }, (_, i) => minNumber + i);
+    }, [minNumber, maxNumber, isPana]);
+
+    useEffect(() => {
+        if (!selectedDraw) return;
+        const openType =
+            selectedDraw.bet_types?.find((t) => t.open) ||
+            selectedDraw.bet_types?.[0];
+        setBetType(openType?.id || (board === 'matka' ? 'jodi' : 'number'));
+        setSelectedNumbers([]);
+        setPanaInput('');
+    }, [selectedDrawId, board]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const selectBoard = (next) => {
         setBoard(next);
         setMarketSearch('');
         setSelectedNumbers([]);
+        setPanaInput('');
         setBetError(null);
         setBetMessage(null);
         const first =
-            (data?.upcoming_draws || []).find(
-                (d) => d.board === next && d.status === 'open',
-            ) ||
+            (data?.upcoming_draws || []).find((d) => d.board === next && d.status === 'open') ||
             (data?.upcoming_draws || []).find((d) => d.board === next);
         setSelectedDrawId(first?.id ?? null);
     };
@@ -131,36 +134,7 @@ export default function Dashboard() {
     const toggleNumber = (n) => {
         setBetMessage(null);
         setBetError(null);
-        setSelectedNumbers((prev) => {
-            if (prev.includes(n)) {
-                return prev.filter((x) => x !== n);
-            }
-            if (pickCount === 1) {
-                return [n];
-            }
-            if (prev.length >= pickCount) {
-                return prev;
-            }
-            return [...prev, n].sort((a, b) => a - b);
-        });
-    };
-
-    const quickPick = () => {
-        setBetMessage(null);
-        setBetError(null);
-        const pool = [...numberPool];
-        const picks = [];
-        while (picks.length < pickCount && pool.length) {
-            const idx = Math.floor(Math.random() * pool.length);
-            picks.push(pool.splice(idx, 1)[0]);
-        }
-        setSelectedNumbers(picks.sort((a, b) => a - b));
-    };
-
-    const clearNumbers = () => {
-        setSelectedNumbers([]);
-        setBetMessage(null);
-        setBetError(null);
+        setSelectedNumbers([n]);
     };
 
     const placeBet = async () => {
@@ -168,22 +142,26 @@ export default function Dashboard() {
             setBetError('Please select a market.');
             return;
         }
-        if (selectedDraw.status !== 'open') {
-            setBetError('This market is closed — result already declared.');
-            return;
-        }
-        if (selectedNumbers.length !== pickCount) {
-            setBetError(
-                pickCount === 1
-                    ? 'Select 1 number (00–99).'
-                    : `Select exactly ${pickCount} numbers.`,
-            );
+        if (!activeType?.open) {
+            setBetError('This bet type is closed for now.');
             return;
         }
         if (amountValue < minAmount || amountValue > maxAmount) {
             setBetError(
                 `Amount must be between ${formatMoney(minAmount)} and ${formatMoney(maxAmount)}.`,
             );
+            return;
+        }
+
+        let numbers = selectedNumbers;
+        if (isPana) {
+            if (!/^\d{3}$/.test(panaInput)) {
+                setBetError('Enter a 3-digit pana (e.g. 257).');
+                return;
+            }
+            numbers = [parseInt(panaInput, 10)];
+        } else if (numbers.length !== 1) {
+            setBetError(`Select 1 number (${padN(minNumber, digits)}–${padN(maxNumber, digits)}).`);
             return;
         }
 
@@ -195,11 +173,15 @@ export default function Dashboard() {
             const response = await axios.post(route('api.bets.store'), {
                 draw_id: selectedDraw.id,
                 board: selectedDraw.board,
-                numbers: selectedNumbers,
+                bet_type: activeType.id,
+                numbers,
                 amount: amountValue,
             });
-            setBetMessage(response.data.message);
+            setBetMessage(
+                `${response.data.message} Potential win ${formatMoney(response.data.bet.potential_win)}.`,
+            );
             setSelectedNumbers([]);
+            setPanaInput('');
             await loadDashboard();
         } catch (err) {
             const errors = err.response?.data?.errors;
@@ -207,6 +189,7 @@ export default function Dashboard() {
                 errors?.numbers?.[0] ||
                     errors?.amount?.[0] ||
                     errors?.draw_id?.[0] ||
+                    errors?.bet_type?.[0] ||
                     errors?.board?.[0] ||
                     err.response?.data?.message ||
                     'Could not place bet. Try again.',
@@ -229,8 +212,8 @@ export default function Dashboard() {
                         Hi, {auth.user?.name?.split(' ')[0] || 'Player'}
                     </h1>
                     <p className="mt-1 text-sm text-app-muted">
-                        Kisi bhi number pe jitni marzi amount — jeet pe 1₹ = 9₹
-                        wallet me.
+                        Pehle amount choose karo, phir number. King = 1₹→9₹ ·
+                        Matka = Single/Jodi/Pana.
                     </p>
                 </div>
 
@@ -275,17 +258,47 @@ export default function Dashboard() {
                                 Place a bet
                             </h2>
                             <p className="mt-0.5 text-xs text-app-muted">
-                                Board → market → number (00–99) → amount
+                                Amount → board → market →{' '}
+                                {board === 'matka' ? 'bet type → number' : 'number'}
                             </p>
                         </div>
                         <p className="text-sm text-app-text">
-                            Win rate 1₹ → ₹{prizeMultiplier}:{' '}
+                            Win {multiplier}×:{' '}
                             <span className="font-semibold text-gold">
-                                {potentialWin
-                                    ? formatMoney(potentialWin)
-                                    : '—'}
+                                {potentialWin ? formatMoney(potentialWin) : '—'}
                             </span>
                         </p>
+                    </div>
+
+                    <div className="mb-4">
+                        <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
+                            Your amount (₹)
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {[10, 20, 50, 100, 500].map((preset) => (
+                                <button
+                                    key={preset}
+                                    type="button"
+                                    onClick={() => setBetAmount(String(preset))}
+                                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+                                        Number(betAmount) === preset
+                                            ? 'bg-gold text-navy-dark'
+                                            : 'bg-navy-dark text-app-muted ring-1 ring-white/10'
+                                    }`}
+                                >
+                                    ₹{preset}
+                                </button>
+                            ))}
+                            <input
+                                type="number"
+                                min={minAmount}
+                                max={maxAmount}
+                                step="1"
+                                value={betAmount}
+                                onChange={(e) => setBetAmount(e.target.value)}
+                                className="w-28 rounded-xl border border-white/10 bg-navy-dark/50 px-3 py-1.5 text-sm text-white focus:border-gold/40 focus:outline-none"
+                            />
+                        </div>
                     </div>
 
                     <div className="mb-4 flex gap-2">
@@ -316,12 +329,12 @@ export default function Dashboard() {
                             type="search"
                             value={marketSearch}
                             onChange={(e) => setMarketSearch(e.target.value)}
-                            placeholder="Search market name…"
+                            placeholder="Search market…"
                             className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-2.5 text-sm text-white placeholder:text-app-muted focus:border-gold/40 focus:outline-none"
                         />
                     </div>
 
-                    <div className="mb-4 max-h-56 space-y-2 overflow-y-auto pr-1">
+                    <div className="mb-4 max-h-52 space-y-2 overflow-y-auto pr-1">
                         {boardDraws.map((draw) => {
                             const active = selectedDrawId === draw.id;
                             const closed = draw.status !== 'open';
@@ -332,7 +345,6 @@ export default function Dashboard() {
                                     disabled={closed}
                                     onClick={() => {
                                         setSelectedDrawId(draw.id);
-                                        setSelectedNumbers([]);
                                         setBetError(null);
                                         setBetMessage(null);
                                     }}
@@ -347,11 +359,19 @@ export default function Dashboard() {
                                     <div className="min-w-0">
                                         <p className="truncate text-sm font-semibold text-white">
                                             {draw.name}
+                                            {draw.is_due && (
+                                                <span className="ms-2 text-[10px] font-bold text-danger">
+                                                    DUE
+                                                </span>
+                                            )}
+                                            {draw.is_next_up && !draw.is_due && (
+                                                <span className="ms-2 text-[10px] font-bold text-gold">
+                                                    NEXT
+                                                </span>
+                                            )}
                                         </p>
                                         <p className="mt-0.5 text-xs text-app-muted">
-                                            {draw.time_label ||
-                                                formatDrawTime(draw.draw_at)}{' '}
-                                            · {draw.ticket_price} · Prize{' '}
+                                            {draw.time_label || formatDrawTime(draw.draw_at)} ·{' '}
                                             {draw.prize}
                                         </p>
                                     </div>
@@ -362,108 +382,102 @@ export default function Dashboard() {
                                                 : 'bg-success/20 text-success'
                                         }`}
                                     >
-                                        {closed
-                                            ? draw.current_result || 'Closed'
-                                            : 'Open'}
+                                        {closed ? draw.current_result || 'Closed' : 'Open'}
                                     </span>
                                 </button>
                             );
                         })}
-                        {!loading && boardDraws.length === 0 && (
-                            <p className="py-4 text-center text-sm text-app-muted">
-                                {marketSearch
-                                    ? 'No market matched your search.'
-                                    : 'No markets loaded yet. Try Refresh.'}
+                    </div>
+
+                    {board === 'matka' && selectedDraw?.bet_types?.length > 0 && (
+                        <div className="mb-4">
+                            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-app-muted">
+                                Matka bet type
                             </p>
-                        )}
-                    </div>
-
-                    <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                        <label className="block">
-                            <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-app-muted">
-                                Bet amount (₹)
-                            </span>
-                            <input
-                                type="number"
-                                min={minAmount}
-                                max={maxAmount}
-                                step="1"
-                                value={betAmount}
-                                onChange={(e) => setBetAmount(e.target.value)}
-                                className="w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-2.5 text-sm text-white focus:border-gold/40 focus:outline-none"
-                            />
-                        </label>
-                        <div className="flex items-end">
-                            <p className="w-full rounded-xl border border-white/10 bg-navy-dark/30 px-4 py-2.5 text-sm text-app-muted">
-                                Selected:{' '}
-                                <span className="font-semibold text-white">
-                                    {selectedDraw?.name || '—'}
-                                </span>
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-app-muted">
-                            Your number ({selectedNumbers.length}/{pickCount})
-                        </p>
-                        <div className="flex gap-2">
-                            <button
-                                type="button"
-                                onClick={quickPick}
-                                className="rounded-lg bg-blue px-3 py-1.5 text-xs font-medium text-app-text transition hover:bg-blue/80"
-                            >
-                                Quick pick
-                            </button>
-                            <button
-                                type="button"
-                                onClick={clearNumbers}
-                                className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-app-muted transition hover:bg-white/10"
-                            >
-                                Clear
-                            </button>
-                        </div>
-                    </div>
-
-                    {selectedNumbers.length > 0 && (
-                        <div className="mb-3 flex flex-wrap gap-2">
-                            {selectedNumbers.map((n) => (
-                                <span
-                                    key={`sel-${n}`}
-                                    className="flex h-9 min-w-9 items-center justify-center rounded-full bg-gold px-2 text-sm font-bold text-navy-dark"
-                                >
-                                    {pad2(n)}
-                                </span>
-                            ))}
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {selectedDraw.bet_types.map((t) => (
+                                    <button
+                                        key={t.id}
+                                        type="button"
+                                        disabled={!t.open}
+                                        onClick={() => {
+                                            setBetType(t.id);
+                                            setSelectedNumbers([]);
+                                            setPanaInput('');
+                                        }}
+                                        className={`rounded-xl border px-3 py-2 text-left text-xs transition ${
+                                            betType === t.id
+                                                ? 'border-gold bg-gold/10 text-gold'
+                                                : t.open
+                                                  ? 'border-white/10 bg-navy-dark/40 text-app-text'
+                                                  : 'cursor-not-allowed border-white/5 opacity-40'
+                                        }`}
+                                    >
+                                        <p className="font-semibold">{t.label}</p>
+                                        <p className="mt-0.5 text-[10px] text-app-muted">
+                                            {t.hint} · {t.multiplier}×
+                                        </p>
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                     )}
 
-                    <div className="mb-4 grid grid-cols-10 gap-1.5">
-                        {numberPool.map((n) => {
-                            const active = selectedNumbers.includes(n);
-                            const full =
-                                pickCount > 1 &&
-                                !active &&
-                                selectedNumbers.length >= pickCount;
-                            return (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    disabled={full}
-                                    onClick={() => toggleNumber(n)}
-                                    className={`flex h-9 items-center justify-center rounded-lg text-xs font-semibold transition sm:h-10 sm:text-sm ${
-                                        active
-                                            ? 'bg-gold text-navy-dark'
-                                            : full
-                                              ? 'cursor-not-allowed bg-white/5 text-app-muted/40'
-                                              : 'bg-navy-dark text-app-text hover:bg-blue'
-                                    }`}
-                                >
-                                    {pad2(n)}
-                                </button>
-                            );
-                        })}
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-medium uppercase tracking-wide text-app-muted">
+                            {isPana
+                                ? 'Enter pana (3 digits)'
+                                : `Pick number (${padN(minNumber, digits)}–${padN(maxNumber, digits)})`}
+                        </p>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setSelectedNumbers([]);
+                                setPanaInput('');
+                            }}
+                            className="rounded-lg bg-white/5 px-3 py-1.5 text-xs font-medium text-app-muted"
+                        >
+                            Clear
+                        </button>
                     </div>
+
+                    {isPana ? (
+                        <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={3}
+                            value={panaInput}
+                            onChange={(e) =>
+                                setPanaInput(e.target.value.replace(/\D/g, '').slice(0, 3))
+                            }
+                            placeholder="e.g. 257"
+                            className="mb-4 w-full rounded-xl border border-white/10 bg-navy-dark/50 px-4 py-3 text-center text-2xl font-bold tracking-[0.3em] text-gold focus:border-gold/40 focus:outline-none"
+                        />
+                    ) : (
+                        <div
+                            className={`mb-4 grid gap-1.5 ${
+                                digits === 1 ? 'grid-cols-5 sm:grid-cols-10' : 'grid-cols-10'
+                            }`}
+                        >
+                            {numberPool.map((n) => {
+                                const active = selectedNumbers.includes(n);
+                                return (
+                                    <button
+                                        key={n}
+                                        type="button"
+                                        onClick={() => toggleNumber(n)}
+                                        className={`flex h-9 items-center justify-center rounded-lg text-xs font-semibold transition sm:h-10 sm:text-sm ${
+                                            active
+                                                ? 'bg-gold text-navy-dark'
+                                                : 'bg-navy-dark text-app-text hover:bg-blue'
+                                        }`}
+                                    >
+                                        {padN(n, digits)}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
 
                     <button
                         type="button"
@@ -472,25 +486,22 @@ export default function Dashboard() {
                             placing ||
                             loading ||
                             !selectedDraw ||
-                            selectedDraw.status !== 'open' ||
-                            selectedNumbers.length !== pickCount
+                            !activeType?.open ||
+                            amountValue < minAmount
                         }
                         className="auth-btn"
                     >
                         {placing
                             ? 'Placing bet…'
-                            : `Place bet · ${formatMoney(amountValue || defaultTicket)}`}
+                            : `Place bet · ${formatMoney(amountValue || 0)} → win ${formatMoney(potentialWin || 0)}`}
                     </button>
                 </section>
 
                 <div className="grid gap-6 lg:grid-cols-2">
                     <section className="dash-fade rounded-2xl bg-card p-5 shadow-sm ring-1 ring-white/10 sm:p-6">
-                        <div className="mb-4 flex items-center justify-between">
-                            <h2 className="font-display text-lg font-semibold text-gold">
-                                My recent bets
-                            </h2>
-                        </div>
-
+                        <h2 className="mb-4 font-display text-lg font-semibold text-gold">
+                            My recent bets
+                        </h2>
                         {loading ? (
                             <div className="space-y-3">
                                 {[1, 2].map((i) => (
@@ -513,44 +524,29 @@ export default function Dashboard() {
                                                     {bet.draw_name}
                                                 </p>
                                                 <p className="mt-0.5 text-xs text-app-muted">
-                                                    {formatDateTime(
-                                                        bet.created_at,
-                                                    )}{' '}
-                                                    · {formatMoney(bet.amount)}
-                                                    {bet.status === 'won' &&
-                                                        bet.prize > 0 && (
-                                                            <>
-                                                                {' '}
-                                                                · Won{' '}
-                                                                {formatMoney(
-                                                                    bet.prize,
-                                                                )}
-                                                            </>
-                                                        )}
+                                                    {formatDateTime(bet.created_at)} ·{' '}
+                                                    {formatMoney(bet.amount)}
+                                                    {bet.status === 'won' && bet.prize > 0 && (
+                                                        <> · Won {formatMoney(bet.prize)}</>
+                                                    )}
                                                     {bet.result_value && (
-                                                        <>
-                                                            {' '}
-                                                            · Result{' '}
-                                                            {bet.result_value}
-                                                        </>
+                                                        <> · Result {bet.result_value}</>
                                                     )}
                                                 </p>
                                             </div>
                                             <StatusBadge status={bet.status} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                            {(
-                                                bet.numbers_display ||
-                                                bet.numbers ||
-                                                []
-                                            ).map((n) => (
-                                                <span
-                                                    key={`${bet.id}-${n}`}
-                                                    className="flex h-7 min-w-7 items-center justify-center rounded-full bg-gold px-1.5 text-[11px] font-semibold text-navy-dark"
-                                                >
-                                                    {n}
-                                                </span>
-                                            ))}
+                                            {(bet.numbers_display || bet.numbers || []).map(
+                                                (n) => (
+                                                    <span
+                                                        key={`${bet.id}-${n}`}
+                                                        className="flex h-7 min-w-7 items-center justify-center rounded-full bg-gold px-1.5 text-[11px] font-semibold text-navy-dark"
+                                                    >
+                                                        {n}
+                                                    </span>
+                                                ),
+                                            )}
                                         </div>
                                     </li>
                                 ))}
@@ -564,12 +560,9 @@ export default function Dashboard() {
                     </section>
 
                     <section className="dash-fade rounded-2xl bg-card p-5 shadow-sm ring-1 ring-white/10 sm:p-6">
-                        <div className="mb-4 flex items-center justify-between">
-                            <h2 className="font-display text-lg font-semibold text-gold">
-                                Recent results
-                            </h2>
-                        </div>
-
+                        <h2 className="mb-4 font-display text-lg font-semibold text-gold">
+                            Due / next results
+                        </h2>
                         {loading ? (
                             <div className="space-y-3">
                                 {[1, 2].map((i) => (
@@ -589,41 +582,22 @@ export default function Dashboard() {
                                                     {result.name}
                                                 </p>
                                                 <p className="text-xs text-app-muted">
-                                                    {formatDrawTime(
-                                                        result.drawn_at,
-                                                    )}
+                                                    {result.close_time ||
+                                                        result.open_time ||
+                                                        formatDrawTime(result.drawn_at)}
+                                                    {result.is_due && ' · DUE'}
+                                                    {result.is_next_up && !result.is_due && ' · NEXT'}
                                                 </p>
                                             </div>
                                             <p className="text-xs font-medium uppercase tracking-wide text-gold">
-                                                {result.status ||
-                                                    result.prize ||
-                                                    '—'}
+                                                {result.status_label || result.status || '—'}
                                             </p>
-                                        </div>
-                                        <div className="flex flex-wrap gap-2">
-                                            {(result.numbers?.length
-                                                ? result.numbers
-                                                : result.result_string
-                                                  ? [result.result_string]
-                                                  : result.today_result &&
-                                                      result.today_result !==
-                                                          'XX'
-                                                    ? [result.today_result]
-                                                    : []
-                                            ).map((n, index) => (
-                                                <span
-                                                    key={`${result.id}-${n}-${index}`}
-                                                    className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-gold px-2 text-xs font-semibold text-navy-dark"
-                                                >
-                                                    {n}
-                                                </span>
-                                            ))}
                                         </div>
                                     </li>
                                 ))}
                                 {!data?.recent_results?.length && (
                                     <li className="text-sm text-app-muted">
-                                        No live results yet.
+                                        No due markets right now.
                                     </li>
                                 )}
                             </ul>

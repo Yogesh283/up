@@ -13,7 +13,9 @@ function chartUrl(result, board) {
 
 function KingRow({ result, index, yesterdayLabel, todayLabel }) {
     const highlight = Boolean(
-        result.is_featured ||
+        result.is_due ||
+            result.is_next_up ||
+            result.is_featured ||
             result.highlight ||
             (result.today_result && result.today_result !== 'XX'),
     );
@@ -22,11 +24,15 @@ function KingRow({ result, index, yesterdayLabel, todayLabel }) {
     return (
         <div
             className={`flex items-center gap-2 border-b border-black/10 px-3 py-3 sm:gap-3 sm:px-4 ${
-                highlight
-                    ? 'bg-[#ffe566]'
-                    : index % 2 === 0
-                      ? 'bg-white'
-                      : 'bg-neutral-100'
+                result.is_due
+                    ? 'bg-[#ffb347]'
+                    : result.is_next_up
+                      ? 'bg-[#ffe566]'
+                      : highlight
+                        ? 'bg-[#ffe566]'
+                        : index % 2 === 0
+                          ? 'bg-white'
+                          : 'bg-neutral-100'
             }`}
         >
             <span className="w-7 shrink-0 text-sm font-bold text-black/70 sm:w-8 sm:text-base">
@@ -35,6 +41,16 @@ function KingRow({ result, index, yesterdayLabel, todayLabel }) {
             <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-bold uppercase leading-tight tracking-wide text-black sm:text-base">
                     {result.name}
+                    {result.is_due && (
+                        <span className="ms-2 rounded bg-black px-1.5 py-0.5 text-[9px] font-bold text-[#ffb347]">
+                            DUE
+                        </span>
+                    )}
+                    {result.is_next_up && !result.is_due && (
+                        <span className="ms-2 rounded bg-black px-1.5 py-0.5 text-[9px] font-bold text-[#ffe566]">
+                            NEXT
+                        </span>
+                    )}
                 </p>
                 <p className="mt-0.5 text-[11px] text-black/80 sm:text-xs">
                     at {timeLabel}{' '}
@@ -61,7 +77,9 @@ function KingRow({ result, index, yesterdayLabel, todayLabel }) {
 }
 
 function MatkaRow({ result, index }) {
-    const highlight = Boolean(result.is_featured || result.is_complete);
+    const highlight = Boolean(
+        result.is_due || result.is_next_up || result.is_featured || result.is_complete,
+    );
     const timeLabel = result.close_time || result.open_time || '—';
     const open = result.cases?.open?.display || result.open_pana || '***';
     const jodi = result.cases?.jodi?.display || result.jodi || '***';
@@ -70,11 +88,15 @@ function MatkaRow({ result, index }) {
     return (
         <div
             className={`border-b border-black/10 px-3 py-3 sm:px-4 ${
-                highlight
-                    ? 'bg-[#ffe566]'
-                    : index % 2 === 0
-                      ? 'bg-white'
-                      : 'bg-neutral-100'
+                result.is_due
+                    ? 'bg-[#ffb347]'
+                    : result.is_next_up
+                      ? 'bg-[#ffe566]'
+                      : highlight
+                        ? 'bg-[#ffe566]'
+                        : index % 2 === 0
+                          ? 'bg-white'
+                          : 'bg-neutral-100'
             }`}
         >
             <div className="mb-2 flex items-start gap-2">
@@ -84,6 +106,16 @@ function MatkaRow({ result, index }) {
                 <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-bold uppercase text-black sm:text-base">
                         {result.name}
+                        {result.is_due && (
+                            <span className="ms-2 rounded bg-black px-1.5 py-0.5 text-[9px] font-bold text-[#ffb347]">
+                                DUE
+                            </span>
+                        )}
+                        {result.is_next_up && !result.is_due && (
+                            <span className="ms-2 rounded bg-black px-1.5 py-0.5 text-[9px] font-bold text-[#ffe566]">
+                                NEXT
+                            </span>
+                        )}
                     </p>
                     <p className="mt-0.5 text-[11px] text-black/80">
                         {timeLabel}{' '}
@@ -269,7 +301,7 @@ export default function Result() {
                 <PageHeader
                     eyebrow="Live boards"
                     title="Results"
-                    subtitle="Auto refresh every 15s — naya result aate hi update."
+                    subtitle="Due / next markets auto top pe — King + Matka dono."
                 />
 
                 <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -330,7 +362,11 @@ export default function Result() {
                 {!loading && latest && board === 'king' && (
                     <section className="mb-4 overflow-hidden rounded-2xl bg-[#ffe566] p-4 text-black shadow-sm ring-1 ring-black/10">
                         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/60">
-                            Last result · King
+                            {latest.is_due
+                                ? 'Due now · King'
+                                : latest.is_next_up
+                                  ? 'Next up · King'
+                                  : 'Focus · King'}
                         </p>
                         <div className="mt-2 flex items-center gap-3">
                             <div className="min-w-0 flex-1">
@@ -361,7 +397,11 @@ export default function Result() {
                 {!loading && latest && board === 'matka' && (
                     <section className="mb-4 overflow-hidden rounded-2xl bg-[#ffe566] p-4 text-black shadow-sm ring-1 ring-black/10">
                         <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/60">
-                            Latest · Kalyan Matka
+                            {latest.is_due
+                                ? 'Due now · Kalyan Matka'
+                                : latest.is_next_up
+                                  ? 'Next up · Kalyan Matka'
+                                  : 'Focus · Kalyan Matka'}
                         </p>
                         <p className="mt-2 text-base font-bold uppercase">
                             {latest.name}

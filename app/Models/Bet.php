@@ -13,6 +13,7 @@ class Bet extends Model
         'draw_name',
         'board',
         'market_slug',
+        'bet_type',
         'numbers',
         'amount',
         'status',

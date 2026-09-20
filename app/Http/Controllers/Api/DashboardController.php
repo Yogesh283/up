@@ -22,9 +22,14 @@ class DashboardController extends Controller
         $draws = Draws::all($resultsPayload);
         $openDraws = collect($draws)->where('status', 'open')->values();
 
-        $recentResults = collect($resultsPayload['declared'] ?? [])
+        $recentResults = collect($resultsPayload['king_results'] ?? [])
+            ->filter(fn ($r) => ($r['is_due'] ?? false) || ($r['is_next_up'] ?? false))
             ->take(4)
-            ->merge(collect($resultsPayload['matka_results'] ?? [])->take(4))
+            ->merge(
+                collect($resultsPayload['matka_results'] ?? [])
+                    ->filter(fn ($r) => ($r['is_due'] ?? false) || ($r['is_next_up'] ?? false))
+                    ->take(4)
+            )
             ->values()
             ->all();
 
@@ -35,9 +40,6 @@ class DashboardController extends Controller
                 ->all();
         }
 
-        $ticket = (float) config('betting.ticket_price', 1);
-        $multiplier = (float) config('betting.prize_multiplier', 9);
-
         return response()->json([
             'user' => [
                 'name' => $user->name,
@@ -45,13 +47,16 @@ class DashboardController extends Controller
             ],
             'wallet_balance' => $balance,
             'betting' => [
-                'ticket_price' => $ticket,
-                'prize_multiplier' => $multiplier,
-                'pick_count' => (int) config('betting.pick_count', 1),
-                'min_number' => (int) config('betting.min_number', 0),
-                'max_number' => (int) config('betting.max_number', 99),
-                'min_amount' => (float) config('betting.min_amount', $ticket),
-                'max_amount' => (float) config('betting.max_amount', 10000),
+                'min_amount' => (float) config('betting.min_amount', 1),
+                'max_amount' => (float) config('betting.max_amount', 100000),
+                'king' => config('betting.king'),
+                'matka_types' => config('betting.matka.types'),
+                // legacy
+                'ticket_price' => (float) config('betting.ticket_price', 1),
+                'prize_multiplier' => (float) config('betting.king.multiplier', 9),
+                'pick_count' => 1,
+                'min_number' => 0,
+                'max_number' => 99,
             ],
             'stats' => [
                 [
@@ -98,24 +103,38 @@ class DashboardController extends Controller
                 'pick_count' => $draw['pick_count'],
                 'min_number' => $draw['min_number'],
                 'max_number' => $draw['max_number'],
+                'multiplier' => $draw['multiplier'],
+                'bet_type' => $draw['bet_type'],
+                'bet_types' => $draw['bet_types'],
                 'status' => $draw['status'],
                 'current_result' => $draw['current_result'],
+                'is_due' => $draw['is_due'] ?? false,
+                'is_next_up' => $draw['is_next_up'] ?? false,
             ])->values(),
-            'my_bets' => $bets->take(5)->map(fn ($bet) => [
-                'id' => $bet->id,
-                'draw_name' => $bet->draw_name,
-                'board' => $bet->board,
-                'numbers' => $bet->numbers,
-                'numbers_display' => collect($bet->numbers ?? [])
-                    ->map(fn ($n) => str_pad((string) $n, 2, '0', STR_PAD_LEFT))
-                    ->all(),
-                'amount' => (float) $bet->amount,
-                'prize' => (float) $bet->prize,
-                'result_value' => $bet->result_value,
-                'status' => $bet->status,
-                'draw_at' => optional($bet->draw_at)?->toIso8601String(),
-                'created_at' => $bet->created_at?->toIso8601String(),
-            ])->values(),
+            'my_bets' => $bets->take(8)->map(function ($bet) {
+                $digits = match ($bet->bet_type) {
+                    'single_open', 'single_close' => 1,
+                    'pana_open', 'pana_close' => 3,
+                    default => 2,
+                };
+
+                return [
+                    'id' => $bet->id,
+                    'draw_name' => $bet->draw_name,
+                    'board' => $bet->board,
+                    'bet_type' => $bet->bet_type,
+                    'numbers' => $bet->numbers,
+                    'numbers_display' => collect($bet->numbers ?? [])
+                        ->map(fn ($n) => str_pad((string) $n, $digits, '0', STR_PAD_LEFT))
+                        ->all(),
+                    'amount' => (float) $bet->amount,
+                    'prize' => (float) $bet->prize,
+                    'result_value' => $bet->result_value,
+                    'status' => $bet->status,
+                    'draw_at' => optional($bet->draw_at)?->toIso8601String(),
+                    'created_at' => $bet->created_at?->toIso8601String(),
+                ];
+            })->values(),
             'recent_results' => $recentResults,
         ]);
     }

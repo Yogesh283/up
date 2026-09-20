@@ -59,6 +59,7 @@ class BetPlacementTest extends TestCase
         $response = $this->actingAs($user)->postJson('/api/bets', [
             'draw_id' => $drawId,
             'board' => 'king',
+            'bet_type' => 'number',
             'numbers' => [45],
             'amount' => 10,
         ]);
@@ -85,6 +86,7 @@ class BetPlacementTest extends TestCase
         $response = $this->actingAs($user)->postJson('/api/bets', [
             'draw_id' => $drawId,
             'board' => 'matka',
+            'bet_type' => 'jodi',
             'numbers' => [7],
             'amount' => 20,
         ]);

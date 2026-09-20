@@ -223,14 +223,35 @@ class SattaKalyanMatkaService
     {
         $name = (string) $row['name'];
         $raw = strtoupper(trim((string) ($row['result'] ?? '')));
-        $isHoliday = $raw === 'HOLIDAY' || $raw === '';
-        $parts = $isHoliday ? [] : (preg_split('/-/', $raw) ?: []);
-        $open = $parts[0] ?? null;
+        $isHoliday = $raw === 'HOLIDAY';
+        $parts = ($isHoliday || $raw === '' || $raw === 'XX')
+            ? []
+            : (preg_split('/-/', $raw) ?: []);
+        $open = isset($parts[0]) && preg_match('/^\d{3}$/', $parts[0]) ? $parts[0] : null;
         $jodi = $parts[1] ?? null;
-        $close = $parts[2] ?? null;
-        $full = $isHoliday ? 'XX' : $raw;
+        $close = isset($parts[2]) && preg_match('/^\d{3}$/', $parts[2]) ? $parts[2] : null;
+        // Mid formats: 123-4  or  123-45
+        if ($open === null && isset($parts[0]) && $parts[0] !== '' && $parts[0] !== 'XX') {
+            // keep non-standard open text only if 3 digit failed — leave null for betting
+            if (preg_match('/^\d{3}$/', (string) $parts[0])) {
+                $open = $parts[0];
+            }
+        }
+        $full = $isHoliday ? 'XX' : ($raw === '' ? 'XX' : $raw);
         $time = $row['time'] ?? '—';
         $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?? '', '-'));
+        $openAnk = \App\Support\MarketSorter::ankFromPana(is_string($open) && preg_match('/^\d{3}$/', $open) ? $open : null);
+        // Mid result like 123-4 (open pana + open ank only)
+        if ($openAnk === null && is_string($jodi) && preg_match('/^\d$/', $jodi) && $close === null) {
+            $openAnk = (int) $jodi;
+        }
+        $closeAnk = \App\Support\MarketSorter::ankFromPana(is_string($close) && preg_match('/^\d{3}$/', $close) ? $close : null);
+        if ($closeAnk === null && is_string($jodi) && preg_match('/^\d{2}$/', $jodi)) {
+            $closeAnk = (int) substr($jodi, -1);
+            if ($openAnk === null) {
+                $openAnk = (int) substr($jodi, 0, 1);
+            }
+        }
 
         return [
             'id' => 'matka-'.$slug,
@@ -249,17 +270,17 @@ class SattaKalyanMatkaService
             'open_pana' => $open,
             'close_pana' => $close,
             'jodi' => $jodi,
-            'open_ank' => null,
-            'close_ank' => null,
+            'open_ank' => $openAnk,
+            'close_ank' => $closeAnk,
             'result_string' => $full !== 'XX' ? $full : null,
             'full_result' => $full,
             'cases' => [
-                'open' => ['label' => 'Open', 'value' => $open, 'ank' => null, 'display' => $open ?: '***'],
+                'open' => ['label' => 'Open', 'value' => $open, 'ank' => $openAnk, 'display' => $open ?: '***'],
                 'jodi' => ['label' => 'Jodi', 'value' => $jodi, 'ank' => null, 'display' => $jodi ?: '***'],
-                'close' => ['label' => 'Close', 'value' => $close, 'ank' => null, 'display' => $close ?: '***'],
+                'close' => ['label' => 'Close', 'value' => $close, 'ank' => $closeAnk, 'display' => $close ?: '***'],
             ],
-            'status' => $isHoliday ? 'holiday' : ($full !== 'XX' ? 'closed' : 'pending'),
-            'status_label' => $isHoliday ? 'Holiday' : ($full !== 'XX' ? 'Declared' : 'Awaiting'),
+            'status' => $isHoliday ? 'holiday' : ($close !== null ? 'closed' : ($open !== null ? 'open_declared' : 'pending')),
+            'status_label' => $isHoliday ? 'Holiday' : ($close !== null ? 'Declared' : ($open !== null ? 'Open out' : 'Awaiting')),
             'open_time' => $time,
             'close_time' => $time,
             'is_complete' => $close !== null,
@@ -269,6 +290,13 @@ class SattaKalyanMatkaService
             'last_result' => $full,
             'today_result' => $full,
             'last_result_date' => $today,
+            'betting' => [
+                'single_open' => $openAnk === null && ! $isHoliday,
+                'pana_open' => $open === null && ! $isHoliday,
+                'jodi' => ($jodi === null || $jodi === '' || ! preg_match('/^\d{2}$/', (string) $jodi)) && ! $isHoliday && $close === null,
+                'single_close' => $closeAnk === null && ! $isHoliday && $open !== null,
+                'pana_close' => $close === null && ! $isHoliday && $open !== null,
+            ],
         ];
     }
 

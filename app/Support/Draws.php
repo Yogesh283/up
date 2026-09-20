@@ -8,25 +8,21 @@ use Carbon\Carbon;
 class Draws
 {
     /**
-     * Open markets from live Satta King + Kalyan Matka boards.
-     *
      * @return list<array<string, mixed>>
      */
     public static function open(?array $payload = null): array
     {
-        $payload ??= app(CombinedResultsService::class)->toResultsPayload();
+        $payload ??= app(CombinedResultsService::class)->toResultsPayload(settleBets: false);
 
         return self::fromPayload($payload, onlyOpen: true);
     }
 
     /**
-     * All markets (open + closed) for dashboard listing.
-     *
      * @return list<array<string, mixed>>
      */
     public static function all(?array $payload = null): array
     {
-        $payload ??= app(CombinedResultsService::class)->toResultsPayload();
+        $payload ??= app(CombinedResultsService::class)->toResultsPayload(settleBets: false);
 
         return self::fromPayload($payload, onlyOpen: false);
     }
@@ -47,24 +43,17 @@ class Draws
      */
     public static function fromPayload(array $payload, bool $onlyOpen = true): array
     {
-        $ticket = (float) config('betting.ticket_price', 1);
-        $multiplier = (float) config('betting.prize_multiplier', 9);
-        $pickCount = (int) config('betting.pick_count', 1);
-        $minNumber = (int) config('betting.min_number', 0);
-        $maxNumber = (int) config('betting.max_number', 99);
-        $prizeDisplay = '1₹ = ₹'.number_format($multiplier, 0);
-
         $draws = [];
 
         foreach ($payload['king_results'] ?? $payload['results'] ?? [] as $row) {
-            $draw = self::mapMarket($row, 'king', $ticket, $prizeDisplay, $pickCount, $minNumber, $maxNumber);
+            $draw = self::mapKingMarket($row);
             if ($draw && (! $onlyOpen || $draw['status'] === 'open')) {
                 $draws[] = $draw;
             }
         }
 
         foreach ($payload['matka_results'] ?? [] as $row) {
-            $draw = self::mapMarket($row, 'matka', $ticket, $prizeDisplay, $pickCount, $minNumber, $maxNumber);
+            $draw = self::mapMatkaMarket($row);
             if ($draw && (! $onlyOpen || $draw['status'] === 'open')) {
                 $draws[] = $draw;
             }
@@ -73,93 +62,139 @@ class Draws
         return $draws;
     }
 
-    /**
-     * Stable unsigned id from board + slug.
-     */
     public static function marketId(string $board, string $slug): int
     {
         return (int) sprintf('%u', crc32(strtolower($board).':'.strtolower($slug)));
+    }
+
+    public static function matkaType(string $type): ?array
+    {
+        $types = config('betting.matka.types', []);
+
+        return $types[$type] ?? null;
     }
 
     /**
      * @param  array<string, mixed>  $row
      * @return array<string, mixed>|null
      */
-    protected static function mapMarket(
-        array $row,
-        string $board,
-        float $ticket,
-        string $prizeDisplay,
-        int $pickCount,
-        int $minNumber,
-        int $maxNumber,
-    ): ?array {
+    protected static function mapKingMarket(array $row): ?array
+    {
         $name = trim((string) ($row['name'] ?? ''));
         if ($name === '') {
             return null;
         }
 
         $slug = (string) ($row['slug'] ?? strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?? '', '-')));
-        if ($slug === '') {
-            $slug = 'market';
-        }
-
+        $cfg = config('betting.king', []);
+        $multiplier = (float) ($cfg['multiplier'] ?? 9);
         $timeLabel = (string) ($row['close_time'] ?? $row['open_time'] ?? '—');
-        $open = self::isMarketOpen($row, $board);
-        $drawAt = self::estimateDrawAt($timeLabel);
-
-        $boardLabel = $board === 'matka' ? 'Kalyan Matka' : 'Satta King';
-        $current = $board === 'matka'
-            ? (string) ($row['jodi'] ?? $row['full_result'] ?? $row['today_result'] ?? 'XX')
-            : (string) ($row['today_result'] ?? 'XX');
+        $open = MarketSorter::isAwaitingResult($row, 'king');
+        $drawAt = MarketSorter::parseDrawAt($row)?->toIso8601String()
+            ?? self::estimateDrawAt($timeLabel);
 
         return [
-            'id' => self::marketId($board, $slug),
-            'board' => $board,
-            'board_label' => $boardLabel,
-            'market_slug' => $slug,
+            'id' => self::marketId('king', $slug ?: 'market'),
+            'board' => 'king',
+            'board_label' => 'Satta King',
+            'market_slug' => $slug ?: 'market',
             'name' => $name,
-            'display_name' => $name.' · '.$boardLabel,
+            'display_name' => $name.' · Satta King',
             'draw_at' => $drawAt,
             'time_label' => $timeLabel,
-            'prize' => $prizeDisplay,
-            'ticket_price' => $ticket,
-            'ticket_price_display' => '₹'.number_format($ticket, 0),
-            'pick_count' => $pickCount,
-            'min_number' => $minNumber,
-            'max_number' => $maxNumber,
+            'prize' => '1₹ = ₹'.number_format($multiplier, 0),
+            'ticket_price' => 1,
+            'ticket_price_display' => '₹1+',
+            'pick_count' => 1,
+            'min_number' => (int) ($cfg['min_number'] ?? 0),
+            'max_number' => (int) ($cfg['max_number'] ?? 99),
+            'multiplier' => $multiplier,
+            'bet_type' => 'number',
+            'bet_types' => [
+                [
+                    'id' => 'number',
+                    'label' => 'Number',
+                    'hint' => '00–99',
+                    'multiplier' => $multiplier,
+                    'digits' => 2,
+                    'min' => 0,
+                    'max' => 99,
+                    'open' => $open,
+                ],
+            ],
             'status' => $open ? 'open' : 'closed',
-            'current_result' => $current !== '' ? $current : 'XX',
+            'current_result' => (string) ($row['today_result'] ?? 'XX'),
+            'urgency_bucket' => $row['urgency_bucket'] ?? null,
+            'is_due' => (bool) ($row['is_due'] ?? false),
+            'is_next_up' => (bool) ($row['is_next_up'] ?? false),
         ];
     }
 
     /**
      * @param  array<string, mixed>  $row
+     * @return array<string, mixed>|null
      */
-    protected static function isMarketOpen(array $row, string $board): bool
+    protected static function mapMatkaMarket(array $row): ?array
     {
-        if ($board === 'matka') {
-            $full = strtoupper(trim((string) ($row['full_result'] ?? '')));
-            if ($full === 'HOLIDAY') {
-                return false;
-            }
-
-            $jodi = $row['jodi'] ?? null;
-            if ($jodi !== null && $jodi !== '' && strtoupper((string) $jodi) !== 'XX') {
-                // Jodi declared — market closed for jodi bets.
-                return false;
-            }
-
-            if ($full !== '' && $full !== 'XX' && preg_match('/^\d{3}-\d{1,2}-\d{3}$/', $full)) {
-                return false;
-            }
-
-            return true;
+        $name = trim((string) ($row['name'] ?? ''));
+        if ($name === '') {
+            return null;
         }
 
-        $today = strtoupper(trim((string) ($row['today_result'] ?? 'XX')));
+        $slug = (string) ($row['slug'] ?? strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $name) ?? '', '-')));
+        $timeLabel = (string) ($row['close_time'] ?? $row['open_time'] ?? '—');
+        $drawAt = MarketSorter::parseDrawAt($row)?->toIso8601String()
+            ?? self::estimateDrawAt($timeLabel);
+        $availability = $row['betting'] ?? [];
 
-        return $today === '' || $today === 'XX';
+        $betTypes = [];
+        foreach (config('betting.matka.types', []) as $id => $cfg) {
+            $isOpen = (bool) ($availability[$id] ?? false);
+            $betTypes[] = [
+                'id' => $id,
+                'label' => $cfg['label'],
+                'hint' => $cfg['hint'],
+                'multiplier' => (float) $cfg['multiplier'],
+                'digits' => (int) $cfg['digits'],
+                'min' => (int) $cfg['min'],
+                'max' => (int) $cfg['max'],
+                'session' => $cfg['session'] ?? null,
+                'open' => $isOpen,
+            ];
+        }
+
+        $anyOpen = collect($betTypes)->contains(fn ($t) => $t['open']);
+        $default = collect($betTypes)->firstWhere('open', true) ?? ($betTypes[0] ?? null);
+
+        return [
+            'id' => self::marketId('matka', $slug ?: 'market'),
+            'board' => 'matka',
+            'board_label' => 'Kalyan Matka',
+            'market_slug' => $slug ?: 'market',
+            'name' => $name,
+            'display_name' => $name.' · Kalyan Matka',
+            'draw_at' => $drawAt,
+            'time_label' => $timeLabel,
+            'prize' => 'Single 9× · Jodi 90× · Pana 140×',
+            'ticket_price' => 1,
+            'ticket_price_display' => '₹1+',
+            'pick_count' => 1,
+            'min_number' => 0,
+            'max_number' => 999,
+            'multiplier' => (float) ($default['multiplier'] ?? 9),
+            'bet_type' => $default['id'] ?? 'jodi',
+            'bet_types' => $betTypes,
+            'status' => $anyOpen ? 'open' : 'closed',
+            'current_result' => (string) ($row['full_result'] ?? $row['jodi'] ?? 'XX'),
+            'urgency_bucket' => $row['urgency_bucket'] ?? null,
+            'is_due' => (bool) ($row['is_due'] ?? false),
+            'is_next_up' => (bool) ($row['is_next_up'] ?? false),
+            'open_pana' => $row['open_pana'] ?? null,
+            'close_pana' => $row['close_pana'] ?? null,
+            'jodi' => $row['jodi'] ?? null,
+            'open_ank' => $row['open_ank'] ?? null,
+            'close_ank' => $row['close_ank'] ?? null,
+        ];
     }
 
     protected static function estimateDrawAt(string $timeLabel): string
@@ -169,14 +204,12 @@ class Draws
 
         if (preg_match('/(\d{1,2}):(\d{2})\s*(AM|PM)/i', $timeLabel, $m)) {
             try {
-                $parsed = Carbon::parse(
+                return Carbon::parse(
                     $today->toDateString().' '.$m[1].':'.$m[2].' '.strtoupper($m[3]),
                     $tz,
-                );
-
-                return $parsed->toIso8601String();
+                )->toIso8601String();
             } catch (\Throwable) {
-                // fall through
+                //
             }
         }
 

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Support\MarketSorter;
+
 class CombinedResultsService
 {
     public function __construct(
@@ -30,6 +32,7 @@ class CombinedResultsService
 
             return $row;
         })->all();
+        $kingResults = MarketSorter::byUrgency($kingResults, 'king');
 
         $matkaResults = collect($matka['results'] ?? [])->map(function (array $row) {
             $row['source_type'] = 'matka';
@@ -37,10 +40,30 @@ class CombinedResultsService
 
             return $row;
         })->all();
+        $matkaResults = MarketSorter::byUrgency($matkaResults, 'matka');
 
         // Default "results" stays King board (existing UI). Matka in separate key.
-        $latestKing = $king['latest'] ?? null;
-        $latestMatka = $matka['latest'] ?? null;
+        $latestKing = collect($kingResults)->first(
+            fn (array $r) => ($r['urgency_bucket'] ?? 1) <= 1
+                && (($r['today_result'] ?? 'XX') !== 'XX' || ($r['is_due'] ?? false) || ($r['is_next_up'] ?? false))
+        ) ?? ($king['latest'] ?? null);
+
+        $latestMatka = collect($matkaResults)->first(
+            fn (array $r) => ($r['urgency_bucket'] ?? 1) <= 1
+        ) ?? ($matka['latest'] ?? null);
+
+        if ($latestKing && is_array($latestKing)) {
+            $latestKing = array_merge($latestKing, [
+                'display_value' => (($latestKing['today_result'] ?? 'XX') !== 'XX')
+                    ? $latestKing['today_result']
+                    : ($latestKing['last_result'] ?? 'XX'),
+            ]);
+        }
+        if ($latestMatka && is_array($latestMatka)) {
+            $latestMatka = array_merge($latestMatka, [
+                'display_value' => $latestMatka['full_result'] ?? $latestMatka['today_result'] ?? 'XX',
+            ]);
+        }
 
         $payload = [
             'latest' => $latestKing,
