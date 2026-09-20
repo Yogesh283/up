@@ -46,4 +46,9 @@ return [
         'proxy_url' => env('SATTA_KING_FAST_PROXY', 'https://r.jina.ai'),
     ],
 
+    'satta_kalyan_matka' => [
+        'base_url' => env('SATTA_KALYAN_MATKA_URL', 'https://sattakalyanmatka.net'),
+        'proxy_url' => env('SATTA_KALYAN_MATKA_PROXY', env('SATTA_KING_FAST_PROXY', 'https://r.jina.ai')),
+    ],
+
 ];
